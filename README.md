@@ -44,7 +44,7 @@ Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma
 
 ### Chat
 
-1. **Caché:** la primera pregunta de una conversación se busca en `answer_cache`. La clave combina el proyecto, la pregunta normalizada (sin tildes ni signos), el modelo y una versión del contenido (cantidad de documentos y su última modificación), así que subir, reprocesar o borrar un documento la invalida sola. Dura `ANSWER_CACHE_TTL_HOURS` (168 h por defecto; 0 la desactiva).
+1. **Caché:** toda pregunta que se entienda por sí sola se busca en `answer_cache`, también a mitad de una conversación. Se saltan las preguntas de seguimiento («¿y en plano?», «¿cuál de esas…?», «dame más»), porque su significado depende de lo anterior. La clave combina el proyecto, la pregunta normalizada (sin tildes ni signos), el modelo y una versión del contenido (cantidad de documentos y su última modificación), así que subir, reprocesar o borrar un documento la invalida sola. Dura `ANSWER_CACHE_TTL_HOURS` (168 h por defecto; 0 la desactiva).
 2. **Búsqueda híbrida:** pide 30 candidatos y se queda con 10, con un máximo de 2 por producto, para que una tela con muchas variantes no acapare el contexto.
 3. **Gemini:** responde en streaming y puede llamar a las herramientas del catálogo (hasta 4 rondas). Las consultas que hace se muestran en el chat y se guardan en `messages.tool_calls`.
 4. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
