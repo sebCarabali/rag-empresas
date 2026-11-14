@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.14.1] - 2026-11-14
+
+### Corregido
+
+- Caché: la misma pregunta quedaba guardada varias veces con respuestas distintas (versiones anteriores del contenido, clave antigua, chat interno y widget por separado). Ahora, al guardar, se borran las entradas de versiones anteriores del proyecto, y si la pregunta ya la respondió Gemini en el otro canal se reutiliza esa respuesta en vez de generar otra o usar Groq.
+- No se guardan en caché las respuestas que dicen que no hay información («no aparece», «no se encontró»): solían venir de búsquedas incompletas o del modelo de respaldo sin herramientas y fijaban un «no» incorrecto.
+
 ## [0.14.0] - 2026-11-14
 
 ### Agregado
