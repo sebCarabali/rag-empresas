@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type Chatbot } from '@/lib/api';
 import { ApiKeysPanel } from './api-keys-panel';
 import { Header } from './header';
+import { UsageTab } from './usage-tab';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
 
 const LANGUAGES = [
@@ -30,6 +31,8 @@ const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boo
 /** Personalización del asistente del proyecto y configuración del widget para el sitio web. */
 export function ChatbotSettings() {
   const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
+  const tab = useSearchParams().get('tab') === 'uso' ? 'uso' : 'config';
   const [projectName, setProjectName] = useState('');
   const [bot, setBot] = useState<Chatbot | null>(null);
   const [canEdit, setCanEdit] = useState(false);
@@ -113,13 +116,45 @@ export function ChatbotSettings() {
         <span>/</span>
         <Link href={`/projects/${projectId}`} className="hover:text-slate-900">{projectName || 'Proyecto'}</Link>
         <span>/</span>
-        <span className="font-medium text-slate-900">Asistente</span>
+        <span className="font-medium text-slate-900">Asistente y widget</span>
       </Header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 px-6 py-8">
+      <main className={`mx-auto w-full flex-1 space-y-6 px-6 py-8 ${tab === 'uso' ? 'max-w-5xl' : 'max-w-3xl'}`}>
+        <nav className="flex gap-2 border-b border-slate-200" aria-label="Secciones">
+          {(
+            [
+              ['config', 'Configuración'],
+              ['uso', 'Uso y gastos'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => router.replace(id === 'uso' ? `/projects/${projectId}/chatbot?tab=uso` : `/projects/${projectId}/chatbot`)}
+              aria-current={tab === id ? 'page' : undefined}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+                tab === id ? 'border-slate-900 font-medium text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
         <ErrorText>{error}</ErrorText>
         {!bot && !error && <Spinner />}
-        {bot && (
+        {bot && tab === 'uso' && (
+          canEdit ? (
+            <>
+              <WidgetLimit enabled={bot.widget_enabled} today={messagesToday} limit={bot.daily_message_limit} />
+              <UsageTab projectId={projectId} />
+            </>
+          ) : (
+            <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              El uso y los gastos solo los ven owner o admin.
+            </p>
+          )
+        )}
+        {bot && tab === 'config' && (
           <form onSubmit={save} className="space-y-6">
             {!canEdit && (
               <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
@@ -317,8 +352,31 @@ export function ChatbotSettings() {
             </fieldset>
           </form>
         )}
-        {bot && canEdit && <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />}
+        {bot && canEdit && tab === 'config' && <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />}
       </main>
     </>
+  );
+}
+
+/** Consumo del día frente al tope diario del widget (lo comparten widget y API de servidor). */
+function WidgetLimit({ enabled, today, limit }: { enabled: boolean; today: number; limit: number }) {
+  const ratio = limit ? Math.min(1, today / limit) : 0;
+  const tone = ratio >= 1 ? 'bg-red-600' : ratio >= 0.8 ? 'bg-amber-500' : 'bg-blue-600';
+  return (
+    <Card className="space-y-2 !p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-medium">Mensajes del widget hoy</p>
+        <p className="text-sm tabular-nums text-slate-700">
+          <strong>{today.toLocaleString('es')}</strong> de {limit.toLocaleString('es')} ({Math.round(ratio * 100)} %)
+        </p>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={today}>
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(ratio * 100, today ? 2 : 0)}%` }} />
+      </div>
+      <p className="text-xs text-slate-500">
+        {enabled ? 'Widget activo.' : 'Widget desactivado.'} Al llegar al tope, el widget y la API de servidor dejan de responder
+        hasta el día siguiente (hora UTC). Cámbialo en Configuración → «Límite de mensajes por día».
+      </p>
+    </Card>
   );
 }

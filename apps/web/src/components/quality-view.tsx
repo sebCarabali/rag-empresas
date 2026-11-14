@@ -13,14 +13,12 @@ import {
   type WidgetMessage,
 } from '@/lib/api';
 import { Header } from './header';
-import { UsageTab } from './usage-tab';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
 
-type Tab = 'usage' | 'feedback' | 'widget' | 'evals';
+type Tab = 'feedback' | 'widget' | 'evals';
 type RatingFilter = 'all' | 'up' | 'down';
 
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'usage', label: 'Uso y caché' },
   { id: 'feedback', label: 'Valoraciones del equipo' },
   { id: 'widget', label: 'Preguntas del sitio web' },
   { id: 'evals', label: 'Pruebas automáticas' },
@@ -42,7 +40,7 @@ const splitList = (text: string) =>
 export function QualityView() {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState('');
-  const [tab, setTab] = useState<Tab>('usage');
+  const [tab, setTab] = useState<Tab>('feedback');
 
   useEffect(() => {
     api.project(projectId).then((p) => setProjectName(p.name), () => undefined);
@@ -58,6 +56,10 @@ export function QualityView() {
         <span className="font-medium text-slate-900">Calidad</span>
       </Header>
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8">
+        <p className="text-xs text-slate-500">
+          El uso, la caché y los gastos están en{' '}
+          <Link href={`/projects/${projectId}/chatbot?tab=uso`} className="underline">Asistente y widget → Uso y gastos</Link>.
+        </p>
         <nav className="flex flex-wrap gap-2 border-b border-slate-200">
           {TABS.map((t) => (
             <button
@@ -71,7 +73,6 @@ export function QualityView() {
             </button>
           ))}
         </nav>
-        {tab === 'usage' && <UsageTab projectId={projectId} />}
         {tab === 'feedback' && <FeedbackTab projectId={projectId} />}
         {tab === 'widget' && <WidgetTab projectId={projectId} />}
         {tab === 'evals' && <EvalsTab projectId={projectId} />}
