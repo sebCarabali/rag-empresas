@@ -39,7 +39,8 @@ class CreateDocumentDto {
 }
 
 const DOCUMENT_COLUMNS =
-  'id, company_id, project_id, name, mime_type, size_bytes, status, error, chunk_count, created_at, updated_at';
+  'id, company_id, project_id, name, mime_type, size_bytes, status, error, chunk_count, created_at, updated_at, ' +
+  'progress_stage, progress_done, progress_total, processing_started_at';
 
 /** Deja solo caracteres seguros para la ruta en Storage. */
 function safeFileName(name: string): string {
@@ -163,7 +164,7 @@ export class DocumentsController {
     const updated = unwrap(
       await this.supabase.admin
         .from('documents')
-        .update({ status: 'pending', error: null })
+        .update({ status: 'pending', error: null, progress_stage: 'queued', progress_done: 0, progress_total: 0 })
         .eq('id', doc.id)
         .select(DOCUMENT_COLUMNS)
         .single(),

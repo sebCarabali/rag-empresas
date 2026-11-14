@@ -96,9 +96,9 @@ Página **Calidad** de cada proyecto (`/projects/:id/quality`):
 ### Flujo de un documento
 
 1. `POST /projects/:id/documents` registra el documento y devuelve una URL firmada.
-2. El navegador sube el archivo **directo a Supabase Storage**, sin pasar por la función.
+2. El navegador sube el archivo **directo a Supabase Storage**, sin pasar por la función, mostrando el avance de la subida.
 3. `POST /documents/:id/process` lo encola en Vercel Queues.
-4. El worker extrae el texto, lo divide en fragmentos, genera los embeddings y los guarda. Si el documento es grande, lo procesa en lotes que encadena por la cola para no pasar de 300 s por invocación.
+4. El worker extrae el texto, lo divide en fragmentos, genera los embeddings y los guarda. Si el documento es grande, lo procesa en lotes que encadena por la cola para no pasar de 300 s por invocación. La etapa y los fragmentos procesados quedan en `documents.progress_*`, y la app muestra el porcentaje y el tiempo restante estimado.
 5. **OCR:** si un PDF casi no tiene texto (menos de 50 caracteres por página, típico de un escaneo) o el archivo es una imagen (PNG, JPG, WebP), Gemini lo transcribe página por página, con la clave de la empresa si la configuró. La transcripción se guarda junto al archivo (`<archivo>.ocr.json`) para que los lotes siguientes y los reprocesos no vuelvan a pagar el OCR. Si Gemini falla, el trabajo se reintenta desde la cola.
 6. **Excel (.xlsx):** cada hoja se procesa como un CSV (un fragmento por fila, catálogo estructurado y descripciones web). Con varias hojas, el nombre de la hoja queda en el fragmento.
 

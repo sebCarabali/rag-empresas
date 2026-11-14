@@ -29,6 +29,11 @@ export interface DocumentItem {
   error: string | null;
   chunk_count: number;
   created_at: string;
+  updated_at?: string;
+  progress_stage?: 'queued' | 'reading' | 'ocr' | 'catalog' | 'embedding' | 'done' | null;
+  progress_done?: number;
+  progress_total?: number;
+  processing_started_at?: string | null;
 }
 
 export interface Conversation {
@@ -290,21 +295,25 @@ export const api = {
   deleteDocument: (documentId: string) => request<void>('DELETE', `/documents/${documentId}`),
 
   /** Registra el documento, sube el archivo directo a Storage y lo encola. */
-  async uploadDocument(projectId: string, file: File): Promise<DocumentItem> {
+  async uploadDocument(
+    projectId: string,
+    file: File,
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<DocumentItem> {
+    const mime = guessMime(file.name);
     const { document, upload } = await request<{
       document: DocumentItem;
-      upload: { path: string; token: string };
+      upload: { path: string; token: string; signedUrl: string };
     }>('POST', `/projects/${projectId}/documents`, {
       fileName: file.name,
-      mimeType: guessMime(file.name),
+      mimeType: mime,
       sizeBytes: file.size,
     });
-    const { error } = await getSupabase()
-      .storage.from('documents')
-      .uploadToSignedUrl(upload.path, upload.token, file, { contentType: guessMime(file.name) });
-    if (error) {
+    try {
+      await uploadWithProgress(upload.signedUrl, file, mime, onProgress);
+    } catch (e) {
       await api.deleteDocument(document.id).catch(() => undefined);
-      throw new ApiError(`No se pudo subir el archivo: ${error.message}`, 400);
+      throw new ApiError(`No se pudo subir el archivo: ${(e as Error).message}`, 400);
     }
     return api.processDocument(document.id);
   },
@@ -445,6 +454,42 @@ export const widgetApi = {
     if (!res.ok) throw new ApiError('No se pudo guardar la valoración', res.status);
   },
 };
+
+/**
+ * Sube el archivo directo a Supabase Storage con la URL firmada, informando el
+ * avance (fetch no lo permite; XMLHttpRequest sí). Mismo formato que usa
+ * supabase-js en uploadToSignedUrl.
+ */
+function uploadWithProgress(
+  signedUrl: string,
+  file: File,
+  mime: string,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('cacheControl', '3600');
+    form.append('', new Blob([file], { type: mime }), file.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', signedUrl);
+    xhr.setRequestHeader('x-upsert', 'false');
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = `error ${xhr.status}`;
+      try {
+        message = JSON.parse(xhr.responseText).message ?? message;
+      } catch {
+        // respuesta sin JSON
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('se perdió la conexión'));
+    xhr.send(form);
+  });
+}
 
 export const ACCEPTED_FILES = '.pdf,.docx,.xlsx,.txt,.md,.csv,.png,.jpg,.jpeg,.webp';
 
