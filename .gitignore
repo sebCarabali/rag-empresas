@@ -1,0 +1,33 @@
+# dependencias
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# entorno
+.env
+.env.*
+!.env.example
+
+# vercel / supabase
+.vercel/
+supabase/.temp/
+supabase/.branches/
+
+# modelos descargados (Transformers.js)
+.cache/
+models-cache/
+
+# varios
+.DS_Store
+*.log
+coverage/
+.idea/
+.vscode/*
+!.vscode/extensions.json
