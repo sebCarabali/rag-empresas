@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.17.0] - 2026-11-14
+
+### Cambiado
+
+- Las claves secretas de API tienen su propia pestaña, «Claves de API», en «Asistente y widget» (owner/admin): tabla de claves con estado, creación, revocación, ejemplos para el servidor (cURL, C#, Java, Node) y token de prueba. La configuración del widget enlaza a esa pestaña cuando se elige el modo protegido.
+
 ## [0.16.0] - 2026-11-14
 
 ### Cambiado
