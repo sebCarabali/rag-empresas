@@ -193,9 +193,9 @@ export class ChatController {
 
     let answer = '';
     try {
-      // 1) Caché: solo para la primera pregunta de una conversación (sin historial).
+      // 1) Caché: cualquier pregunta que se entienda sola (no las de seguimiento).
       let cacheKey: string | null = null;
-      if (this.cache.enabled && previous.length === 0) {
+      if (this.cache.enabled && !AnswerCacheService.isFollowUp(question, previous.length > 0)) {
         const version = await this.cache.contentVersion(db, projectId);
         cacheKey = this.cache.key(projectId, version, question);
         const hit = await this.cache.get(cacheKey);
