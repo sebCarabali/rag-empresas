@@ -16,12 +16,27 @@ export type GeminiEvent =
 /** Rondas máximas de llamadas a herramientas antes de forzar la respuesta final. */
 const MAX_TOOL_ROUNDS = 4;
 
+/** Clientes reutilizables por clave (la de la plataforma y las de cada empresa). */
+const clients = new Map<string, GoogleGenAI>();
+const MAX_CLIENTS = 100;
+
+export function geminiClient(apiKey: string): GoogleGenAI {
+  let client = clients.get(apiKey);
+  if (!client) {
+    if (clients.size >= MAX_CLIENTS) clients.delete(clients.keys().next().value as string);
+    client = new GoogleGenAI({ apiKey });
+    clients.set(apiKey, client);
+  }
+  return client;
+}
+
 @Injectable()
 export class GeminiService {
-  private readonly ai: GoogleGenAI;
+  /** Cliente con la clave de la plataforma (se puede reemplazar en pruebas). */
+  private ai: GoogleGenAI;
 
   constructor(private readonly config: AppConfig) {
-    this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+    this.ai = geminiClient(config.geminiApiKey);
   }
 
   /**
@@ -32,8 +47,10 @@ export class GeminiService {
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal } = {},
+    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; apiKey?: string } = {},
   ): AsyncGenerator<GeminiEvent> {
+    // Clave de la empresa si la configuró; si no, la de la plataforma.
+    const ai = options.apiKey ? geminiClient(options.apiKey) : this.ai;
     const contents: Content[] = turns.map((t) => ({
       role: t.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: t.content }],
@@ -43,7 +60,7 @@ export class GeminiService {
     for (let round = 0; ; round++) {
       // En la última ronda se quitan las herramientas para obligar a responder.
       const useTools = hasTools && round < MAX_TOOL_ROUNDS;
-      const stream = await this.ai.models.generateContentStream({
+      const stream = await ai.models.generateContentStream({
         model: this.config.geminiModel,
         contents,
         config: {

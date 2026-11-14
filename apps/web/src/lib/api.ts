@@ -73,6 +73,7 @@ export interface ModelInfo {
   model: string;
   fallback: boolean;
   reason?: string;
+  keyOwner?: 'company' | 'platform';
 }
 
 export interface Message {
@@ -83,6 +84,28 @@ export interface Message {
   tool_calls?: ToolCall[];
   model_info?: ModelInfo | null;
   created_at: string;
+}
+
+export interface Chatbot {
+  id?: string;
+  project_id: string;
+  name: string;
+  welcome_message: string | null;
+  instructions: string | null;
+  suggested_questions: string[];
+  primary_color: string;
+  avatar_url: string | null;
+  language: 'auto' | 'es' | 'en' | 'pt';
+  widget_enabled: boolean;
+  public_key: string | null;
+  allowed_origins: string[];
+  daily_message_limit: number;
+  widget_show_sources: boolean;
+}
+
+export interface CompanySettings {
+  canEdit: boolean;
+  gemini: { configured: boolean; last4: string | null; updatedAt: string | null };
 }
 
 export class ApiError extends Error {
@@ -156,6 +179,17 @@ export const api = {
   refreshEnrichments: (projectId: string, force = false) =>
     request<{ queued: boolean }>('POST', `/projects/${projectId}/enrichments/refresh`, { force }),
 
+  chatbot: (projectId: string) =>
+    request<{ exists: boolean; canEdit: boolean; messagesToday: number; chatbot: Chatbot }>('GET', `/projects/${projectId}/chatbot`),
+  saveChatbot: (projectId: string, values: Omit<Chatbot, 'id' | 'project_id' | 'public_key'>) =>
+    request<Chatbot>('PUT', `/projects/${projectId}/chatbot`, values),
+  rotateChatbotKey: (projectId: string) => request<Chatbot>('POST', `/projects/${projectId}/chatbot/rotate-key`, {}),
+
+  companySettings: (companyId: string) => request<CompanySettings>('GET', `/companies/${companyId}/settings`),
+  setGeminiKey: (companyId: string, apiKey: string) =>
+    request<void>('PUT', `/companies/${companyId}/gemini-key`, { apiKey }),
+  deleteGeminiKey: (companyId: string) => request<void>('DELETE', `/companies/${companyId}/gemini-key`),
+
   conversations: (projectId: string) => request<Conversation[]>('GET', `/projects/${projectId}/conversations`),
   createConversation: (projectId: string) =>
     request<Conversation>('POST', `/projects/${projectId}/conversations`, {}),
@@ -210,6 +244,61 @@ export const api = {
         else if (event.type === 'error') handlers.onError(event.message);
       }
     }
+  },
+};
+
+/** Evento de un stream NDJSON del chat. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type StreamEvent = { type: string } & Record<string, any>;
+
+/** Lee una respuesta NDJSON y llama a onEvent por cada línea. */
+export async function readNdjson(res: Response, onEvent: (event: StreamEvent) => void): Promise<void> {
+  if (!res.body) return;
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line) as StreamEvent);
+  }
+}
+
+/** API pública del widget (sin sesión). */
+export const widgetApi = {
+  config: async (publicKey: string) => {
+    const res = await fetch(`${API_URL}/widget/${publicKey}/config`);
+    if (!res.ok) throw new ApiError('Chatbot no disponible', res.status);
+    return (await res.json()) as {
+      name: string;
+      welcomeMessage: string | null;
+      suggestedQuestions: string[];
+      primaryColor: string;
+      avatarUrl: string | null;
+      showSources: boolean;
+    };
+  },
+  ask: async (
+    publicKey: string,
+    content: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    onEvent: (event: StreamEvent) => void,
+    signal?: AbortSignal,
+  ) => {
+    const res = await fetch(`${API_URL}/widget/${publicKey}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, history }),
+      signal,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      onEvent({ type: 'error', message: data.message ?? `Error ${res.status}` });
+      return;
+    }
+    await readNdjson(res, onEvent);
   },
 };
 

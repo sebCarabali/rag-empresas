@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GoogleGenAI } from '@google/genai';
+import { geminiClient } from '../chat/gemini.service';
+import { CompanyKeysService } from '../companies/company-keys.service';
 import { AppConfig } from '../config/app-config';
 import { SupabaseService } from '../supabase/supabase.service';
 
@@ -36,13 +37,15 @@ const MAX_SOURCES = 5;
 @Injectable()
 export class EnrichmentService {
   private readonly logger = new Logger(EnrichmentService.name);
-  private readonly ai: GoogleGenAI;
+  /** Cliente con la clave de la plataforma (se puede reemplazar en pruebas). */
+  private ai: ReturnType<typeof geminiClient>;
 
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
+    private readonly keys: CompanyKeysService,
   ) {
-    this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+    this.ai = geminiClient(config.geminiApiKey);
   }
 
   async run(job: EnrichJob): Promise<{ next?: EnrichJob }> {
@@ -77,6 +80,8 @@ export class EnrichmentService {
       .eq('project_id', project.id)
       .eq('status', 'pending');
 
+    // Las búsquedas se hacen con la clave de Gemini de la empresa si la configuró.
+    const companyKey = await this.keys.getGeminiKey(project.company_id);
     const byKey = new Map(list.map((v) => [`${v.campo}\u0000${v.valor}`, v]));
     let done = 0;
     for (const row of pending ?? []) {
@@ -86,7 +91,7 @@ export class EnrichmentService {
       }
       const info = byKey.get(`${row.field}\u0000${row.value}`);
       try {
-        const result = await this.describe(row.field, row.value, info?.contexto ?? {});
+        const result = await this.describe(row.field, row.value, info?.contexto ?? {}, companyKey);
         await db
           .from('catalog_enrichments')
           .update({
@@ -123,6 +128,7 @@ export class EnrichmentService {
     field: string,
     value: string,
     context: { composiciones?: string[]; tipos_de_tejido?: string[] },
+    apiKey?: string | null,
   ): Promise<WebDescription> {
     const details = [
       context.tipos_de_tejido?.length ? `tejido ${context.tipos_de_tejido.join(' / ').toLowerCase()}` : null,
@@ -140,7 +146,8 @@ export class EnrichmentService {
       'No inventes marcas, precios ni datos de un fabricante. Si el nombre parece una denominación comercial ' +
       'o una agrupación interna, describe la categoría textil general que corresponde según el contexto.';
 
-    const response = await this.ai.models.generateContent({
+    const ai = apiKey ? geminiClient(apiKey) : this.ai;
+    const response = await ai.models.generateContent({
       model: this.config.geminiModel,
       contents: prompt,
       config: {

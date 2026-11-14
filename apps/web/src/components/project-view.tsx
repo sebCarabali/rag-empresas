@@ -8,16 +8,19 @@ import { DocumentsPanel } from './documents-panel';
 import { EnrichmentsPanel } from './enrichments-panel';
 import { Header } from './header';
 import { ErrorText, Spinner } from './ui';
-import { api, type Project } from '@/lib/api';
+import { api, type Chatbot, type Project } from '@/lib/api';
 
 export function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
+  const [bot, setBot] = useState<Chatbot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.project(projectId).then(setProject, (e) => setError(e.message));
+    // Personalización del asistente (si falla, el chat funciona con los valores por defecto).
+    api.chatbot(projectId).then((r) => setBot(r.chatbot), () => undefined);
   }, [projectId]);
 
   async function remove() {
@@ -40,7 +43,10 @@ export function ProjectView() {
           <>
             <span>/</span>
             <span className="font-medium text-slate-900">{project.name}</span>
-            <button onClick={() => void remove()} className="ml-auto text-xs text-red-600 hover:text-red-800">
+            <Link href={`/projects/${project.id}/chatbot`} className="ml-auto text-xs font-medium text-slate-700 hover:text-slate-900">
+              Asistente y widget
+            </Link>
+            <button onClick={() => void remove()} className="text-xs text-red-600 hover:text-red-800">
               Eliminar proyecto
             </button>
           </>
@@ -59,7 +65,7 @@ export function ProjectView() {
               <EnrichmentsPanel projectId={project.id} />
             </div>
             <div className="min-h-[60vh] lg:min-h-0">
-              <ChatPanel projectId={project.id} />
+              <ChatPanel projectId={project.id} bot={bot} />
             </div>
           </div>
         )}
