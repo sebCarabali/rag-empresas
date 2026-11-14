@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { API_URL, api, type ApiKey } from '@/lib/api';
-import { Button, Card, ErrorText, Input } from './ui';
+import { Badge, Button, Card, ErrorText, Input, SectionTitle } from './ui';
 
 const DEMO_URL = 'https://rag-empresas-widget-demo.vercel.app';
 
@@ -132,102 +132,173 @@ export function ApiKeysPanel({ projectId, publicKey }: { projectId: string; publ
   }
 
   const code = examples(API_URL)[lang];
+  const active = keys?.filter((k) => !k.revoked_at) ?? [];
+  const revoked = keys?.filter((k) => k.revoked_at) ?? [];
   return (
-    <Card className="space-y-5">
-      <div>
-        <h2 className="font-semibold">Claves secretas de API</h2>
-        <p className="mt-1 text-sm text-muted">
-          La API genera la clave y la muestra <strong>una sola vez</strong>; solo se guarda su huella (hash), así que nadie
-          puede volver a verla. Úsala únicamente en el servidor de tu sitio: con ella se emiten los tokens temporales del widget
-          protegido y se puede preguntar al asistente por API. Nunca la pongas en el HTML ni en JavaScript del navegador.
-        </p>
-      </div>
-      <ErrorText>{error}</ErrorText>
-
-      {created?.key && (
-        <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
-          <p className="text-sm font-medium text-amber-900">Copia la clave ahora: no se volverá a mostrar.</p>
-          <div className="flex gap-2">
-            <code className="flex-1 break-all rounded bg-white px-2 py-1.5 text-xs">{created.key}</code>
-            <Button type="button" variant="secondary" onClick={() => copy(created.key!, 'new')}>
-              {copied === 'new' ? 'Copiada ✓' : 'Copiar'}
-            </Button>
-          </div>
-          <p className="text-xs text-amber-900">Guárdala como variable de entorno <code>RAG_API_KEY</code> en tu servidor.</p>
-          <button type="button" className="text-xs text-amber-900 underline" onClick={() => setCreated(null)}>
-            Ya la guardé
-          </button>
+    <div className="flex flex-col gap-6">
+      <Card className="space-y-5">
+        <div className="flex flex-col gap-1.5">
+          <SectionTitle aside={keys && <Badge tone={active.length ? 'ok' : 'neutral'}>{active.length} activa{active.length === 1 ? '' : 's'}</Badge>}>
+            Claves secretas
+          </SectionTitle>
+          <p className="text-sm leading-relaxed text-muted">
+            La API genera cada clave y la muestra <strong className="text-ink">una sola vez</strong>: solo se guarda su huella
+            (hash), así que nadie puede volver a verla. Úsala únicamente en el servidor de tu sitio. Nunca la pongas en el HTML
+            ni en el JavaScript del navegador.
+          </p>
         </div>
-      )}
+        <ErrorText>{error}</ErrorText>
 
-      <div className="flex gap-2">
-        <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Nombre (p. ej. Sitio web)" />
-        <Button type="button" onClick={() => void create()}>Generar clave</Button>
-      </div>
+        {created?.key && (
+          <div className="space-y-2.5 rounded-xl border border-[#f2d29b] bg-warn-soft p-4" role="status">
+            <p className="text-sm font-semibold text-warn">Copia la clave ahora: no se volverá a mostrar.</p>
+            <div className="flex flex-wrap gap-2">
+              <code className="min-w-0 flex-1 break-all rounded-lg border border-[#f2d29b] bg-white px-3 py-2 font-mono text-xs">{created.key}</code>
+              <Button type="button" variant="secondary" onClick={() => copy(created.key!, 'new')}>
+                {copied === 'new' ? 'Copiada ✓' : 'Copiar'}
+              </Button>
+            </div>
+            <p className="text-xs text-warn">
+              Guárdala como variable de entorno <code className="font-mono">RAG_API_KEY</code> en tu servidor.
+            </p>
+            <button type="button" className="text-xs font-medium text-warn underline" onClick={() => setCreated(null)}>
+              Ya la guardé
+            </button>
+          </div>
+        )}
 
-      <ul className="divide-y divide-line rounded-lg border border-line text-sm">
-        {keys?.length === 0 && <li className="px-3 py-2 text-muted">Aún no hay claves.</li>}
-        {keys?.map((k) => (
-          <li key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-            <span className="font-medium">{k.name}</span>
-            <code className="text-xs text-muted">{k.prefix}…{k.last4}</code>
-            <span className="text-xs text-muted">creada {fmt(k.created_at)} · último uso {fmt(k.last_used_at)}</span>
-            {k.revoked_at ? (
-              <span className="ml-auto text-xs text-red-600">revocada {fmt(k.revoked_at)}</span>
-            ) : (
-              <button type="button" onClick={() => void revoke(k)} className="ml-auto text-xs text-red-600 hover:text-red-800">
-                Revocar
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+        >
+          <label htmlFor="key-name" className="sr-only">
+            Nombre de la clave
+          </label>
+          <Input
+            id="key-name"
+            value={name}
+            maxLength={60}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nombre (p. ej. Sitio web)"
+            className="min-w-[200px] flex-1"
+          />
+          <Button type="submit" className="h-11">
+            Generar clave
+          </Button>
+        </form>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Cómo usarla en tu servidor</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="overflow-x-auto rounded-xl border border-line">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-[#f8f9fb] text-xs text-muted">
+              <tr>
+                <th className="px-4 py-2.5 font-medium">Nombre</th>
+                <th className="px-4 py-2.5 font-medium">Clave</th>
+                <th className="px-4 py-2.5 font-medium">Creada</th>
+                <th className="px-4 py-2.5 font-medium">Último uso</th>
+                <th className="px-4 py-2.5 font-medium">
+                  <span className="sr-only">Acciones</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {!keys && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-3 text-muted">Cargando…</td>
+                </tr>
+              )}
+              {keys?.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-3 text-muted">Aún no hay claves. Genera la primera arriba.</td>
+                </tr>
+              )}
+              {[...active, ...revoked].map((k) => (
+                <tr key={k.id} className={`border-t border-line ${k.revoked_at ? 'text-muted' : ''}`}>
+                  <td className="px-4 py-3 font-medium">{k.name}</td>
+                  <td className="px-4 py-3">
+                    <code className="font-mono text-xs">{k.prefix}…{k.last4}</code>
+                  </td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap">{fmt(k.created_at)}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap">{fmt(k.last_used_at)}</td>
+                  <td className="px-4 py-3 text-right">
+                    {k.revoked_at ? (
+                      <Badge tone="danger">Revocada</Badge>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void revoke(k)}
+                        className="text-xs font-medium text-red-700 hover:text-red-900"
+                      >
+                        Revocar
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card className="space-y-4">
+        <div className="flex flex-col gap-1.5">
+          <SectionTitle>Cómo usarla en tu servidor</SectionTitle>
+          <p className="text-sm leading-relaxed text-muted">
+            Con la clave tu servidor emite los tokens temporales del widget protegido (<code className="font-mono text-xs">POST /v1/widget-tokens</code>)
+            y puede preguntar al asistente directamente (<code className="font-mono text-xs">POST /v1/chat</code>).
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Lenguaje del ejemplo">
           {LANGS.map(([id, label]) => (
             <button
               key={id}
               type="button"
+              role="tab"
+              aria-selected={lang === id}
               onClick={() => setLang(id)}
-              className={`rounded-full border px-3 py-1 text-xs ${lang === id ? 'border-brand bg-brand text-white' : 'border-line-strong hover:bg-canvas'}`}
+              className={`h-9 rounded-full border px-3.5 text-xs font-medium ${
+                lang === id ? 'border-brand bg-brand text-white' : 'border-line-strong text-ink-2 hover:bg-canvas'
+              }`}
             >
               {label}
             </button>
           ))}
         </div>
-        <pre className="overflow-x-auto rounded-xl bg-side p-4 text-xs text-slate-100">{code}</pre>
-        <button type="button" onClick={() => copy(code, 'code')} className="text-xs font-medium text-ink-2 hover:text-ink">
+        <pre className="overflow-x-auto rounded-xl bg-side p-4 font-mono text-xs leading-relaxed text-slate-100">{code}</pre>
+        <Button type="button" variant="secondary" onClick={() => copy(code, 'code')}>
           {copied === 'code' ? 'Copiado ✓' : 'Copiar ejemplo'}
-        </button>
-      </div>
+        </Button>
+      </Card>
 
       {publicKey && (
-        <div className="space-y-2 border-t border-line pt-4">
-          <p className="text-sm font-medium">Probar el modo protegido sin servidor</p>
-          <p className="text-xs text-muted">
-            Genera un token de prueba válido por 1 hora y ábrelo en la página de prueba (agrega su dominio en «Dominios
-            autorizados»).
+        <Card className="space-y-3">
+          <SectionTitle>Probar el modo protegido sin servidor</SectionTitle>
+          <p className="text-sm leading-relaxed text-muted">
+            Genera un token de prueba válido por 1 hora y ábrelo en la página de prueba. Agrega antes su dominio en
+            «Configuración → Dominios autorizados».
           </p>
-          <Button type="button" variant="secondary" onClick={() => void makeTestToken()}>
-            Generar token de prueba
-          </Button>
-          {testToken && (
-            <p className="text-xs">
-              Vence {fmt(testToken.expiresAt)} ·{' '}
-              <a
-                className="font-medium text-brand underline"
-                target="_blank"
-                rel="noopener noreferrer"
-                href={`${DEMO_URL}/?bot=${publicKey}&token=${encodeURIComponent(testToken.token)}`}
-              >
-                Abrir en la página de prueba
-              </a>
-            </p>
-          )}
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="button" variant="secondary" onClick={() => void makeTestToken()}>
+              Generar token de prueba
+            </Button>
+            {testToken && (
+              <span className="text-sm">
+                Vence {fmt(testToken.expiresAt)} ·{' '}
+                <a
+                  className="font-medium text-brand underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  href={`${DEMO_URL}/?bot=${publicKey}&token=${encodeURIComponent(testToken.token)}`}
+                >
+                  Abrir en la página de prueba
+                </a>
+              </span>
+            )}
+          </div>
+        </Card>
       )}
-    </Card>
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type Chatbot } from '@/lib/api';
@@ -30,7 +31,8 @@ const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boo
 /** Personalización del asistente del proyecto y configuración del widget para el sitio web. */
 export function ChatbotSettings() {
   const { projectId } = useParams<{ projectId: string }>();
-  const tab = useSearchParams().get('tab') === 'uso' ? 'uso' : 'config';
+  const tabParam = useSearchParams().get('tab');
+  const tab = tabParam === 'uso' ? 'uso' : tabParam === 'claves' ? 'claves' : 'config';
   const [bot, setBot] = useState<Chatbot | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [messagesToday, setMessagesToday] = useState(0);
@@ -109,9 +111,10 @@ export function ChatbotSettings() {
   return (
     <ProjectShell
       projectId={projectId}
-      title={tab === 'uso' ? 'Uso y gastos' : 'Asistente y widget'}
+      title={tab === 'uso' ? 'Uso y gastos' : tab === 'claves' ? 'Claves de API' : 'Asistente y widget'}
       tabs={[
         { id: 'config', label: 'Configuración', href: base },
+        { id: 'claves', label: 'Claves de API', href: `${base}?tab=claves` },
         { id: 'uso', label: 'Uso y gastos', href: `${base}?tab=uso` },
       ]}
       activeTab={tab}
@@ -119,6 +122,12 @@ export function ChatbotSettings() {
       <div className={`w-full space-y-6 ${tab === 'uso' ? 'max-w-6xl' : 'max-w-3xl'}`}>
         <ErrorText>{error}</ErrorText>
         {!bot && !error && <Spinner />}
+        {bot && tab === 'claves' &&
+          (canEdit ? (
+            <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />
+          ) : (
+            <p className="rounded-[10px] bg-canvas px-3.5 py-2.5 text-sm text-muted">Las claves de API solo las administran owner o admin.</p>
+          ))}
         {bot && tab === 'uso' && (
           canEdit ? (
             <>
@@ -285,6 +294,15 @@ export function ChatbotSettings() {
                       en sitios sin servidor propio), pero cualquiera que copie la clave puede llamar al chat.
                     </span>
                   </label>
+                  {bot.widget_auth === 'token' && (
+                    <p className="rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-sm text-brand-hover">
+                      Genera la clave secreta y copia el ejemplo para tu servidor en{' '}
+                      <Link href={`/projects/${projectId}/chatbot?tab=claves`} className="font-medium underline">
+                        Claves de API
+                      </Link>
+                      .
+                    </p>
+                  )}
                 </fieldset>
 
                 {bot.public_key ? (
@@ -293,7 +311,7 @@ export function ChatbotSettings() {
                     <p className="text-xs text-muted">
                       Pégalo antes de &lt;/body&gt; en las páginas de tu sitio.
                       {bot.widget_auth === 'token' &&
-                        ' En modo protegido, «/chat-token» es una ruta de TU servidor que devuelve {"token": "…"} (ver ejemplos abajo).'}
+                        ' En modo protegido, «/chat-token» es una ruta de TU servidor que devuelve {"token": "…"} (ver ejemplos en «Claves de API»).'}
                     </p>
                     <pre className="overflow-x-auto rounded-xl bg-side p-4 text-xs text-slate-100">{snippet}</pre>
                     <div className="flex flex-wrap gap-3 text-xs">
@@ -329,7 +347,6 @@ export function ChatbotSettings() {
             </fieldset>
           </form>
         )}
-        {bot && canEdit && tab === 'config' && <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />}
       </div>
     </ProjectShell>
   );
