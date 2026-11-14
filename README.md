@@ -85,7 +85,8 @@ Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma
 
 1. **Caché:** toda pregunta que se entienda por sí sola se busca en `answer_cache`, también a mitad de una conversación. Se saltan las preguntas de seguimiento («¿y en plano?», «¿cuál de esas…?», «dame más»), porque su significado depende de lo anterior. La clave combina el proyecto, la pregunta normalizada (sin tildes ni signos), el modelo, si es el chat interno o el widget, y una versión del contenido (cantidad de documentos y su última modificación), así que subir, reprocesar o borrar un documento la invalida sola. Dura `ANSWER_CACHE_TTL_HOURS` (168 h por defecto; 0 la desactiva).
 1b. **Caché por significado:** si no hay una pregunta idéntica, se busca una guardada con significado parecido (similitud del embedding ≥ `SEMANTIC_CACHE_MIN_SIMILARITY`, 0,92 por defecto; 1 la desactiva). Para no confundir «algodón» con «poliéster» o «popelina» con «popelina rígida», solo se reutiliza si ambas preguntas tienen las mismas cifras y los mismos términos del catálogo (función `catalog_vocabulary`: palabras de los campos categóricos). El chat muestra qué pregunta se reutilizó.
-2. **Búsqueda híbrida:** pide 30 candidatos y se queda con 10, con un máximo de 2 por producto, para que una tela con muchas variantes no acapare el contexto.
+2. **Búsqueda híbrida:** pide 30 candidatos (vectores + texto en español, combinados con RRF).
+2b. **Reordenador:** un cross-encoder local (`RERANKER_MODEL`, por defecto `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, multilingüe, licencia Apache 2.0, archivo ONNX cuantizado de ~120 MB) lee la pregunta junto con cada candidato y los ordena por relevancia real. Luego se eligen 10, con un máximo de 2 por producto, para que una tela con muchas variantes no acapare el contexto. Si el reordenador no responde en `RERANKER_TIMEOUT_MS` (6 s; pasa en el arranque en frío mientras descarga el modelo), se usa el orden de la búsqueda. `RERANKER_ENABLED=false` lo apaga.
 3. **Gemini:** responde en streaming y puede llamar a las herramientas del catálogo (hasta 4 rondas). Las consultas que hace se muestran en el chat y se guardan en `messages.tool_calls`.
 4. **Respaldo en Groq:** si Gemini falla (cuota, servicio caído, clave inválida) o no empieza a responder en `GEMINI_FIRST_EVENT_TIMEOUT_MS` (25 s), la misma pregunta se responde con Groq (`GROQ_MODEL`, por defecto `openai/gpt-oss-120b`), con el mismo contexto y las mismas herramientas del catálogo. El chat muestra qué modelo respondió y por qué hubo cambio; queda guardado en `messages.model_info`. Las respuestas del respaldo también se cachean, pero como **provisionales**: cuando alguien repite esa pregunta se intenta solo con Gemini. Si Gemini responde, su respuesta reemplaza a la de Groq en la caché; si sigue fallando, se entrega la de Groq guardada, sin volver a llamar a Groq. Requiere `GROQ_KEY`.
 5. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
@@ -199,6 +200,7 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 | PUT/DELETE | `/projects/:projectId/evals/cases/:caseId` | Editar / eliminar pregunta de prueba |
 | GET/POST | `/projects/:projectId/evals/runs` | Listar / ejecutar pruebas |
 | GET | `/projects/:projectId/evals/runs/:runId` | Resultado de una ejecución |
+| GET/POST | `/projects/:projectId/reindex` | Estado del índice de búsqueda / reindexar con el modelo actual (owner/admin) |
 | POST | `/widget/:key/messages/:id/feedback` | Valoración del visitante (público, requiere su `sessionId`) |
 
 ## Límites conocidos
@@ -207,4 +209,15 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 - Las pruebas automáticas comparan textos, no el sentido: una respuesta correcta redactada con otra cifra o nombre se marca como fallida. Conviene esperar datos concretos (cifras, códigos, nombres).
 - Los CSV se procesan por filas: un fragmento por producto con texto limpio («Columna: valor»). Las exportaciones de WooCommerce se reconocen solas (atributos en pares nombre/valor, aunque el encabezado no esté en la primera fila), las variantes con los mismos atributos se agrupan y las composiciones abreviadas se expanden (Pol → Poliéster, Alg → Algodón…).
 - Además, cada producto de un CSV se guarda en la tabla `catalog_items`. El chat le da a Gemini dos herramientas (`contar_productos` y `buscar_productos`) que ejecutan la función `search_catalog` con filtros exactos (menor, mayor, igual, contiene…), conteos agrupados y orden. Así responde bien preguntas como «telas de menos de 120 g/m²», «¿cuántas hay por submarca?» o «la más pesada». La función usa el JWT del usuario (RLS) y arma el SQL con `format(%L)`, sin riesgo de inyección.
-- Si cambias el modelo de embeddings por uno con otra dimensión, hay que ajustar `vector(384)` en la migración y reprocesar todos los documentos.
+- El reordenador y los embeddings corren en la CPU de la función: la primera pregunta tras un despliegue descarga los modelos a `/tmp`.
+
+## Cambiar el modelo de embeddings
+
+El modelo por defecto es `Xenova/multilingual-e5-small` (384 dimensiones). Si se queda corto con preguntas difíciles, se puede pasar a `Xenova/multilingual-e5-base` (768, ~280 MB, unas 3 veces más lento al indexar) o `Xenova/multilingual-e5-large` (1024, ~560 MB). Debe ser un modelo E5 (usa los prefijos `query:`/`passage:`).
+
+1. Si cambia la dimensión, en el SQL Editor de Supabase: `select public.set_embedding_dimensions(768);` Esto borra los embeddings (el texto se conserva) y marca todos los proyectos como pendientes.
+2. En el proyecto de la API en Vercel: `EMBEDDING_MODEL=Xenova/multilingual-e5-base` y `EMBEDDING_DIMENSIONS=768`; redesplegar.
+3. Cada proyecto se reindexa solo la primera vez que alguien lo abre o le pregunta (o con «Reindexar» en la lista de documentos). No se vuelven a leer los archivos ni se gasta OCR: se recalculan los embeddings del texto guardado. Mientras tanto la búsqueda por palabras sigue respondiendo.
+4. Revisar `SEMANTIC_CACHE_MIN_SIMILARITY` con las pruebas de calidad: cada modelo reparte las similitudes de otra forma.
+
+Entre los pasos 1 y 2 los documentos que se suban fallan por dimensión distinta; conviene hacerlos seguidos.

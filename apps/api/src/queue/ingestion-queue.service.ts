@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QueueClient } from '@vercel/queue';
 import { AppConfig } from '../config/app-config';
+import { ReindexService, type ReembedJob } from '../embeddings/reindex.service';
 import { EnrichmentService, type EnrichJob } from '../enrichment/enrichment.service';
 import { EvalRunnerService, type EvalJob } from '../evals/eval-runner.service';
 import { CacheWarmService, type WarmJob } from '../cache/cache-warm.service';
@@ -11,7 +12,7 @@ import {
 } from '../ingestion/ingestion.service';
 
 /** Mensajes del topic: procesar un documento, generar descripciones web o ejecutar pruebas de calidad. */
-export type QueueJob = IngestionJob | EnrichJob | EvalJob | WarmJob;
+export type QueueJob = IngestionJob | EnrichJob | EvalJob | WarmJob | ReembedJob;
 
 function isEnrichJob(job: QueueJob): job is EnrichJob {
   return (job as EnrichJob).kind === 'enrich';
@@ -25,7 +26,12 @@ function isWarmJob(job: QueueJob): job is WarmJob {
   return (job as WarmJob).kind === 'warm';
 }
 
+function isReembedJob(job: QueueJob): job is ReembedJob {
+  return (job as ReembedJob).kind === 'reembed';
+}
+
 function jobId(job: QueueJob): string {
+  if (isReembedJob(job)) return `reembed:${job.projectId}:${job.cursor ?? 'start'}`;
   if (isWarmJob(job)) return `warm:${job.projectId}:${job.runId ?? 'auto'}:${job.batch ?? 0}`;
   if (isEvalJob(job)) return `eval:${job.runId}:${job.batch ?? 0}`;
   if (isEnrichJob(job)) return `enrich:${job.projectId}:${job.force ? 'f' : ''}`;
@@ -58,7 +64,10 @@ export class IngestionQueueService {
     private readonly enrichment: EnrichmentService,
     private readonly evals: EvalRunnerService,
     private readonly warm: CacheWarmService,
-  ) {}
+    private readonly reindex: ReindexService,
+  ) {
+    this.reindex.requester = (job) => this.enqueue(job);
+  }
 
   async enqueue(job: QueueJob): Promise<void> {
     if (this.config.ingestInline) {
@@ -76,6 +85,7 @@ export class IngestionQueueService {
     if (isEnrichJob(job)) return this.handleEnrich(job, deliveryCount);
     if (isEvalJob(job)) return this.handleEval(job, deliveryCount);
     if (isWarmJob(job)) return this.handleWarm(job, deliveryCount);
+    if (isReembedJob(job)) return this.handleReembed(job, deliveryCount);
     try {
       const result = await this.ingestion.process(job);
       if (result.next) {
@@ -151,6 +161,22 @@ export class IngestionQueueService {
         await this.warm.markFailed(job.runId, message);
         return;
       }
+      throw err;
+    }
+  }
+
+  private async handleReembed(job: ReembedJob, deliveryCount: number): Promise<void> {
+    try {
+      const result = await this.reindex.run(job);
+      if (result.next) await this.enqueue(result.next);
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      if (deliveryCount >= MAX_DELIVERIES) {
+        this.logger.error(`Reindexado de ${job.projectId} falló: ${message}`);
+        await this.reindex.markFailed(job.projectId, message);
+        return;
+      }
+      this.logger.warn(`Reindexado de ${job.projectId}, intento ${deliveryCount}: ${message}`);
       throw err;
     }
   }

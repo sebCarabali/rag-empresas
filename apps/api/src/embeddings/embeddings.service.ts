@@ -14,7 +14,7 @@ type Extractor = (
 let extractorPromise: Promise<Extractor> | null = null;
 
 /**
- * Embeddings locales y gratuitos con multilingual-e5-small (Transformers.js + ONNX).
+ * Embeddings locales y gratuitos (por defecto multilingual-e5-small; Transformers.js + ONNX).
  * Los modelos E5 requieren prefijos: "passage: " para documentos y "query: " para preguntas.
  */
 @Injectable()
@@ -40,7 +40,7 @@ export class EmbeddingsService {
     if (process.env.VERCEL) env.cacheDir = '/tmp/transformers-cache';
 
     const extractor = await pipeline('feature-extraction', this.config.embeddingModel, {
-      dtype: 'q8', // versión cuantizada: más liviana y rápida en CPU
+      dtype: this.config.embeddingDtype as 'q8', // q8: cuantizado, más liviano y rápido en CPU
     });
     this.logger.log(`Modelo ${this.config.embeddingModel} cargado en ${Date.now() - started} ms`);
     return extractor as unknown as Extractor;
