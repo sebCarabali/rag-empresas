@@ -1,7 +1,7 @@
 {
   "name": "rag-empresas",
   "private": true,
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Plataforma RAG multi-empresa: Next.js + NestJS en Vercel, Supabase (pgvector) y Gemini",
   "packageManager": "pnpm@10.28.0",
   "engines": {
