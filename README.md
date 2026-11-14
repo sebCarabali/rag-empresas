@@ -79,12 +79,22 @@ Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma
 4. **Respaldo en Groq:** si Gemini falla (cuota, servicio caído, clave inválida) o no empieza a responder en `GEMINI_FIRST_EVENT_TIMEOUT_MS` (25 s), la misma pregunta se responde con Groq (`GROQ_MODEL`, por defecto `openai/gpt-oss-120b`), con el mismo contexto y las mismas herramientas del catálogo. El chat muestra qué modelo respondió y por qué hubo cambio; queda guardado en `messages.model_info`. Las respuestas del respaldo también se cachean, pero como **provisionales**: cuando alguien repite esa pregunta se intenta solo con Gemini. Si Gemini responde, su respuesta reemplaza a la de Groq en la caché; si sigue fallando, se entrega la de Groq guardada, sin volver a llamar a Groq. Requiere `GROQ_KEY`.
 5. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
 
+### Calidad de respuestas
+
+Página **Calidad** de cada proyecto (`/projects/:id/quality`):
+
+- **👍/👎 con comentario** en cada respuesta del chat de la app y del widget. Las del chat quedan en `message_feedback` (cada usuario ve las suyas; owner/admin ven las de todo el equipo, con la pregunta que las originó).
+- **Preguntas del sitio web:** cada pregunta del widget se registra en `widget_messages` con su respuesta, el modelo, si vino de caché y la valoración del visitante. Los visitantes son anónimos (identificador aleatorio por sesión del navegador). La ven owner, admin y editor. Solo la API (service_role) escribe en esta tabla, y un visitante solo puede valorar respuestas de su propia sesión.
+- **Pruebas automáticas:** preguntas con los textos que la respuesta debe contener (y, opcionalmente, los que no). «Ejecutar pruebas» las encola; el worker pasa cada una por el mismo motor del chat **sin caché** y guarda el resultado en `eval_results`. La comparación no distingue mayúsculas, tildes, Markdown ni separadores de miles («1.234» = «1234»). Máximo 100 preguntas por proyecto; las ejecuciones largas continúan en otro lote de la cola.
+
 ### Flujo de un documento
 
 1. `POST /projects/:id/documents` registra el documento y devuelve una URL firmada.
 2. El navegador sube el archivo **directo a Supabase Storage**, sin pasar por la función.
 3. `POST /documents/:id/process` lo encola en Vercel Queues.
 4. El worker extrae el texto, lo divide en fragmentos, genera los embeddings y los guarda. Si el documento es grande, lo procesa en lotes que encadena por la cola para no pasar de 300 s por invocación.
+5. **OCR:** si un PDF casi no tiene texto (menos de 50 caracteres por página, típico de un escaneo) o el archivo es una imagen (PNG, JPG, WebP), Gemini lo transcribe página por página, con la clave de la empresa si la configuró. La transcripción se guarda junto al archivo (`<archivo>.ocr.json`) para que los lotes siguientes y los reprocesos no vuelvan a pagar el OCR. Si Gemini falla, el trabajo se reintenta desde la cola.
+6. **Excel (.xlsx):** cada hoja se procesa como un CSV (un fragmento por fila, catálogo estructurado y descripciones web). Con varias hojas, el nombre de la hoja queda en el fragmento.
 
 ## Estructura
 
@@ -165,11 +175,19 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 | GET | `/conversations/:id/messages` | Historial |
 | POST | `/conversations/:id/messages` | Preguntar (respuesta NDJSON en streaming) |
 | DELETE | `/conversations/:id` | Eliminar conversación |
+| PUT/DELETE | `/messages/:id/feedback` | Valorar una respuesta (👍/👎 y comentario) / quitar la valoración |
+| GET | `/projects/:projectId/feedback?rating=all\|up\|down` | Valoraciones del chat interno |
+| GET | `/projects/:projectId/widget-messages?rating=&before=` | Preguntas de los visitantes del widget |
+| GET/POST | `/projects/:projectId/evals/cases` | Listar / crear preguntas de prueba |
+| PUT/DELETE | `/projects/:projectId/evals/cases/:caseId` | Editar / eliminar pregunta de prueba |
+| GET/POST | `/projects/:projectId/evals/runs` | Listar / ejecutar pruebas |
+| GET | `/projects/:projectId/evals/runs/:runId` | Resultado de una ejecución |
+| POST | `/widget/:key/messages/:id/feedback` | Valoración del visitante (público, requiere su `sessionId`) |
 
 ## Límites conocidos
 
-- Los PDF escaneados (imágenes) no tienen texto: necesitan OCR, que no está incluido.
-- Formatos soportados: PDF, DOCX, TXT, Markdown y CSV.
+- Formatos soportados: PDF (también escaneados, con OCR), DOCX, XLSX, TXT, Markdown, CSV e imágenes PNG/JPG/WebP. El OCR usa una llamada a Gemini por documento; los PDF de más de ~15 MB se suben con la Files API de Gemini y se borran al terminar.
+- Las pruebas automáticas comparan textos, no el sentido: una respuesta correcta redactada con otra cifra o nombre se marca como fallida. Conviene esperar datos concretos (cifras, códigos, nombres).
 - Los CSV se procesan por filas: un fragmento por producto con texto limpio («Columna: valor»). Las exportaciones de WooCommerce se reconocen solas (atributos en pares nombre/valor, aunque el encabezado no esté en la primera fila), las variantes con los mismos atributos se agrupan y las composiciones abreviadas se expanden (Pol → Poliéster, Alg → Algodón…).
 - Además, cada producto de un CSV se guarda en la tabla `catalog_items`. El chat le da a Gemini dos herramientas (`contar_productos` y `buscar_productos`) que ejecutan la función `search_catalog` con filtros exactos (menor, mayor, igual, contiene…), conteos agrupados y orden. Así responde bien preguntas como «telas de menos de 120 g/m²», «¿cuántas hay por submarca?» o «la más pesada». La función usa el JWT del usuario (RLS) y arma el SQL con `format(%L)`, sin riesgo de inyección.
 - Si cambias el modelo de embeddings por uno con otra dimensión, hay que ajustar `vector(384)` en la migración y reprocesar todos los documentos.

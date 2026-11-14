@@ -2,17 +2,28 @@ import { Injectable, Logger } from '@nestjs/common';
 import { QueueClient } from '@vercel/queue';
 import { AppConfig } from '../config/app-config';
 import { EnrichmentService, type EnrichJob } from '../enrichment/enrichment.service';
+import { EvalRunnerService, type EvalJob } from '../evals/eval-runner.service';
 import {
   IngestionService,
   PermanentIngestionError,
   type IngestionJob,
 } from '../ingestion/ingestion.service';
 
-/** Mensajes del topic: procesar un documento o generar descripciones web. */
-export type QueueJob = IngestionJob | EnrichJob;
+/** Mensajes del topic: procesar un documento, generar descripciones web o ejecutar pruebas de calidad. */
+export type QueueJob = IngestionJob | EnrichJob | EvalJob;
 
 function isEnrichJob(job: QueueJob): job is EnrichJob {
   return (job as EnrichJob).kind === 'enrich';
+}
+
+function isEvalJob(job: QueueJob): job is EvalJob {
+  return (job as EvalJob).kind === 'eval';
+}
+
+function jobId(job: QueueJob): string {
+  if (isEvalJob(job)) return `eval:${job.runId}:${job.batch ?? 0}`;
+  if (isEnrichJob(job)) return `enrich:${job.projectId}:${job.force ? 'f' : ''}`;
+  return `${job.documentId}:${job.startChunk}`;
 }
 
 /** Reintentos antes de marcar un documento como fallido. */
@@ -39,6 +50,7 @@ export class IngestionQueueService {
     private readonly config: AppConfig,
     private readonly ingestion: IngestionService,
     private readonly enrichment: EnrichmentService,
+    private readonly evals: EvalRunnerService,
   ) {}
 
   async enqueue(job: QueueJob): Promise<void> {
@@ -49,13 +61,13 @@ export class IngestionQueueService {
     // Evita lotes duplicados si el mismo trabajo se publica dos veces en el mismo minuto
     // (doble clic, reintento del cliente); permite reprocesar más tarde.
     const minute = Math.floor(Date.now() / 60_000);
-    const id = isEnrichJob(job) ? `enrich:${job.projectId}:${job.force ? 'f' : ''}` : `${job.documentId}:${job.startChunk}`;
-    await this.client.send(this.config.ingestionTopic, job, { idempotencyKey: `${id}:${minute}` });
+    await this.client.send(this.config.ingestionTopic, job, { idempotencyKey: `${jobId(job)}:${minute}` });
   }
 
   /** Handler del consumidor de la cola: procesa un lote y encola el siguiente si hace falta. */
   async handleMessage(job: QueueJob, deliveryCount: number): Promise<void> {
     if (isEnrichJob(job)) return this.handleEnrich(job, deliveryCount);
+    if (isEvalJob(job)) return this.handleEval(job, deliveryCount);
     try {
       const result = await this.ingestion.process(job);
       if (result.next) await this.enqueue(result.next);
@@ -85,6 +97,22 @@ export class IngestionQueueService {
         return;
       }
       this.logger.warn(`Enriquecimiento del proyecto ${job.projectId}, intento ${deliveryCount}: ${message}`);
+      throw err;
+    }
+  }
+
+  private async handleEval(job: EvalJob, deliveryCount: number): Promise<void> {
+    try {
+      const result = await this.evals.run(job);
+      if (result.next) await this.enqueue(result.next);
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      if (deliveryCount >= MAX_DELIVERIES) {
+        this.logger.error(`Prueba de calidad ${job.runId} falló: ${message}`);
+        await this.evals.markFailed(job.runId, message);
+        return;
+      }
+      this.logger.warn(`Prueba de calidad ${job.runId}, intento ${deliveryCount}: ${message}`);
       throw err;
     }
   }

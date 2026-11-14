@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { api, type Chatbot, type Conversation, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
+import { api, type Chatbot, type Conversation, type Feedback, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
+import { FeedbackButtons } from './feedback-buttons';
 import { Button, ErrorText } from './ui';
 
 interface ChatMessage {
@@ -13,6 +14,7 @@ interface ChatMessage {
   modelInfo?: ModelInfo | null;
   cached?: boolean;
   streaming?: boolean;
+  feedback?: Feedback | null;
 }
 
 export function ChatPanel({ projectId, bot }: { projectId: string; bot?: Chatbot | null }) {
@@ -274,6 +276,16 @@ function MessageBubble({ message, color }: { message: ChatMessage; color: string
             {message.modelInfo && message.cached && ' · '}
             {message.cached && 'Respuesta desde caché'}
           </p>
+        )}
+        {!isUser && !message.streaming && !message.id.startsWith('tmp-') && message.content && (
+          <FeedbackButtons
+            initialRating={message.feedback?.rating}
+            initialComment={message.feedback?.comment}
+            color={color}
+            onRate={async (rating, comment) => {
+              await api.rateMessage(message.id, rating, comment);
+            }}
+          />
         )}
         {!isUser && message.sources.length > 0 && !message.streaming && (
           <details className="mt-2 text-xs text-slate-600">
