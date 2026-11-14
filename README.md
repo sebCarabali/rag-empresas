@@ -33,6 +33,15 @@ Supabase Storage    Supabase Postgres + pgvector (RLS por empresa)
 - Solo el worker usa la `service_role` key.
 - El prompt trata los fragmentos como datos, no como instrucciones, para mitigar *prompt injection* desde documentos subidos.
 
+### Descripciones web de las telas
+
+Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma cola. Para cada valor distinto de los campos de `ENRICH_FIELDS` (por defecto `Familia` y `Tipo de tejido`), le pide a Gemini, **con Google Search**, una descripción general: qué es, características, usos y cuidados. Le pasa como contexto las composiciones y los tipos de tejido más frecuentes de esa familia en el catálogo. El resultado se guarda en `catalog_enrichments` con sus fuentes web.
+
+- Se genera **una sola vez** por valor y proyecto: con el catálogo actual son unas 16 búsquedas, no una por pregunta.
+- En el chat, si la pregunta menciona una familia o los productos recuperados pertenecen a ella, se agrega su descripción al contexto marcada como «descripción general (web)», y en las fuentes aparece con sus enlaces. El prompt obliga a tomar los datos técnicos del catálogo, nunca de la web.
+- En la vista del proyecto, el panel **Descripciones web** permite revisarlas, reintentar las fallidas o regenerarlas.
+- La búsqueda con Google de Gemini **requiere una clave con facturación activa**. Sin facturación, las descripciones quedan con error y el resto funciona igual. `WEB_ENRICHMENT=false` la desactiva.
+
 ### Chat
 
 1. **Caché:** la primera pregunta de una conversación se busca en `answer_cache`. La clave combina el proyecto, la pregunta normalizada (sin tildes ni signos), el modelo y una versión del contenido (cantidad de documentos y su última modificación), así que subir, reprocesar o borrar un documento la invalida sola. Dura `ANSWER_CACHE_TTL_HOURS` (168 h por defecto; 0 la desactiva).

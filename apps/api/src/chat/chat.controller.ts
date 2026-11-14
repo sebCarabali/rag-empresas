@@ -19,7 +19,16 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { GeminiService, type ChatTurn } from './gemini.service';
 import { AnswerCacheService } from './answer-cache.service';
 import { createCatalogExecutor, loadCatalogContext, type CatalogToolCall } from './catalog-tools';
-import { buildUserTurn, diversify, SYSTEM_INSTRUCTION, toSources, type RetrievedChunk, type Source } from './prompt';
+import { loadEnrichments } from './enrichment-context';
+import {
+  buildUserTurn,
+  diversify,
+  SYSTEM_INSTRUCTION,
+  toSources,
+  type ExtraContext,
+  type RetrievedChunk,
+  type Source,
+} from './prompt';
 
 class CreateConversationDto {
   @IsOptional()
@@ -211,6 +220,24 @@ export class ChatController {
 
       const chunks = diversify((matches ?? []) as RetrievedChunk[], MATCH_COUNT);
       const sources = toSources(chunks);
+
+      // Descripciones generales (web) de las familias de tela que aparecen en la pregunta o los resultados.
+      const enrichments = await loadEnrichments(db, projectId, question, chunks);
+      const extras: ExtraContext[] = enrichments.map((e) => ({
+        label: `${e.field} "${e.value}" — descripción general (web)`,
+        content: e.description,
+      }));
+      enrichments.forEach((e) =>
+        sources.push({
+          index: sources.length + 1,
+          documentId: '',
+          documentName: `${e.field}: ${e.value} — descripción general (web)`,
+          chunkIndex: -1,
+          snippet: e.description.length > 280 ? `${e.description.slice(0, 280)}…` : e.description,
+          kind: 'web',
+          links: e.sources,
+        }),
+      );
       emit({ type: 'sources', sources });
 
       // 3) Herramientas de catálogo (filtros exactos, conteos, rankings) si hay CSV procesados.
@@ -219,7 +246,7 @@ export class ChatController {
       const execute = catalog ? createCatalogExecutor(db, projectId, sources, toolCalls) : undefined;
       const systemInstruction = catalog ? `${SYSTEM_INSTRUCTION}\n${catalog.instructions}` : SYSTEM_INSTRUCTION;
 
-      const turns: ChatTurn[] = [...previous, { role: 'user', content: buildUserTurn(question, chunks) }];
+      const turns: ChatTurn[] = [...previous, { role: 'user', content: buildUserTurn(question, chunks, extras) }];
       for await (const event of this.gemini.run(systemInstruction, turns, {
         tools: catalog?.declarations,
         execute,

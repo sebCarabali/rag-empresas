@@ -1,11 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QueueClient } from '@vercel/queue';
 import { AppConfig } from '../config/app-config';
+import { EnrichmentService, type EnrichJob } from '../enrichment/enrichment.service';
 import {
   IngestionService,
   PermanentIngestionError,
   type IngestionJob,
 } from '../ingestion/ingestion.service';
+
+/** Mensajes del topic: procesar un documento o generar descripciones web. */
+export type QueueJob = IngestionJob | EnrichJob;
+
+function isEnrichJob(job: QueueJob): job is EnrichJob {
+  return (job as EnrichJob).kind === 'enrich';
+}
 
 /** Reintentos antes de marcar un documento como fallido. */
 export const MAX_DELIVERIES = 4;
@@ -30,9 +38,10 @@ export class IngestionQueueService {
   constructor(
     private readonly config: AppConfig,
     private readonly ingestion: IngestionService,
+    private readonly enrichment: EnrichmentService,
   ) {}
 
-  async enqueue(job: IngestionJob): Promise<void> {
+  async enqueue(job: QueueJob): Promise<void> {
     if (this.config.ingestInline) {
       setImmediate(() => void this.runInline(job));
       return;
@@ -40,16 +49,17 @@ export class IngestionQueueService {
     // Evita lotes duplicados si el mismo trabajo se publica dos veces en el mismo minuto
     // (doble clic, reintento del cliente); permite reprocesar más tarde.
     const minute = Math.floor(Date.now() / 60_000);
-    await this.client.send(this.config.ingestionTopic, job, {
-      idempotencyKey: `${job.documentId}:${job.startChunk}:${minute}`,
-    });
+    const id = isEnrichJob(job) ? `enrich:${job.projectId}:${job.force ? 'f' : ''}` : `${job.documentId}:${job.startChunk}`;
+    await this.client.send(this.config.ingestionTopic, job, { idempotencyKey: `${id}:${minute}` });
   }
 
   /** Handler del consumidor de la cola: procesa un lote y encola el siguiente si hace falta. */
-  async handleMessage(job: IngestionJob, deliveryCount: number): Promise<void> {
+  async handleMessage(job: QueueJob, deliveryCount: number): Promise<void> {
+    if (isEnrichJob(job)) return this.handleEnrich(job, deliveryCount);
     try {
       const result = await this.ingestion.process(job);
       if (result.next) await this.enqueue(result.next);
+      if (result.enrichProjectId) await this.enqueue({ kind: 'enrich', projectId: result.enrichProjectId });
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       const permanent = err instanceof PermanentIngestionError;
@@ -63,9 +73,25 @@ export class IngestionQueueService {
     }
   }
 
+  /** El enriquecimiento es opcional: si falla, no afecta al documento. */
+  private async handleEnrich(job: EnrichJob, deliveryCount: number): Promise<void> {
+    try {
+      const result = await this.enrichment.run(job);
+      if (result.next) await this.enqueue(result.next);
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      if (deliveryCount >= MAX_DELIVERIES) {
+        this.logger.error(`Enriquecimiento del proyecto ${job.projectId} abandonado: ${message}`);
+        return;
+      }
+      this.logger.warn(`Enriquecimiento del proyecto ${job.projectId}, intento ${deliveryCount}: ${message}`);
+      throw err;
+    }
+  }
+
   /** Fábrica del handler (req, res) que Vercel invoca al entregar mensajes. */
   createNodeConsumer() {
-    return this.client.handleNodeCallback<IngestionJob>(
+    return this.client.handleNodeCallback<QueueJob>(
       (job, metadata) => this.handleMessage(job, metadata.deliveryCount),
       {
         visibilityTimeoutSeconds: 330, // un poco más que la duración máxima de la función
@@ -74,7 +100,7 @@ export class IngestionQueueService {
     );
   }
 
-  private async runInline(job: IngestionJob): Promise<void> {
+  private async runInline(job: QueueJob): Promise<void> {
     for (let attempt = 1; ; attempt++) {
       try {
         await this.handleMessage(job, attempt);
