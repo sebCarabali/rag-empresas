@@ -151,8 +151,8 @@ export class ChatEngineService {
       }
     }
 
-    // Las respuestas del modelo de respaldo no se cachean: la próxima vez se intenta de nuevo con Gemini.
-    if (cacheKey && answer.trim() && !modelInfo?.fallback) {
+    // Se cachean las respuestas de ambos modelos (Gemini y el respaldo en Groq).
+    if (cacheKey && answer.trim()) {
       await this.cache.put(cacheKey, projectId, question, { answer, sources, toolCalls, modelInfo });
     }
     return { answer, sources, toolCalls, modelInfo, cached: false };
