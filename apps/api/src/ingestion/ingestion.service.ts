@@ -3,7 +3,7 @@ import { AppConfig } from '../config/app-config';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { chunkSections, type Chunk } from './chunker';
-import { csvToChunks } from './csv-catalog';
+import { csvToCatalogItems, csvToChunks } from './csv-catalog';
 import { extractText, UnsupportedFileError } from './text-extractor';
 
 export interface IngestionJob {
@@ -21,6 +21,7 @@ export interface IngestionResult {
 export class PermanentIngestionError extends Error {}
 
 const EMBED_BATCH_SIZE = 16;
+const CATALOG_INSERT_BATCH = 500;
 /** Margen bajo el límite de 300 s de Vercel (Hobby) para guardar y encolar el siguiente lote. */
 const TIME_BUDGET_MS = 200_000;
 
@@ -68,9 +69,9 @@ export class IngestionService {
       throw new PermanentIngestionError(`No se pudo descargar el archivo: ${dlError?.message ?? 'vacío'}`);
     }
 
+    const buffer = Buffer.from(await file.arrayBuffer());
     let chunks: Chunk[];
     try {
-      const buffer = Buffer.from(await file.arrayBuffer());
       // Los CSV se procesan por filas (un fragmento por producto); el resto, por texto.
       chunks =
         doc.mime_type === 'text/csv'
@@ -79,6 +80,11 @@ export class IngestionService {
     } catch (err) {
       if (err instanceof UnsupportedFileError) throw new PermanentIngestionError(err.message);
       throw new PermanentIngestionError(`No se pudo leer el archivo: ${(err as Error).message}`);
+    }
+
+    // Catálogo estructurado (filtros exactos y conteos): se reemplaza al iniciar el documento.
+    if (job.startChunk === 0 && doc.mime_type === 'text/csv') {
+      await this.replaceCatalog(doc, csvToCatalogItems(buffer));
     }
 
     if (chunks.length === 0) {
@@ -116,6 +122,32 @@ export class IngestionService {
     await this.updateDocument(doc.id, { status: 'ready', chunk_count: chunks.length, error: null });
     this.logger.log(`Documento ${doc.id} listo: ${chunks.length} chunks en ${Date.now() - started} ms`);
     return {};
+  }
+
+  private async replaceCatalog(
+    doc: { id: string; company_id: string; project_id: string },
+    items: ReturnType<typeof csvToCatalogItems>,
+  ): Promise<void> {
+    const db = this.supabase.admin;
+    const { error: delError } = await db.from('catalog_items').delete().eq('document_id', doc.id);
+    if (delError) throw new Error(`Catálogo: ${delError.message}`);
+
+    for (let i = 0; i < items.length; i += CATALOG_INSERT_BATCH) {
+      const rows = items.slice(i, i + CATALOG_INSERT_BATCH).map((item) => ({
+        company_id: doc.company_id,
+        project_id: doc.project_id,
+        document_id: doc.id,
+        row_number: item.row,
+        name: item.name,
+        code: item.code,
+        attributes: item.attributes,
+        numbers: item.numbers,
+        image_url: item.image,
+      }));
+      const { error } = await db.from('catalog_items').insert(rows);
+      if (error) throw new Error(`Catálogo: ${error.message}`);
+    }
+    if (items.length > 0) this.logger.log(`Documento ${doc.id}: ${items.length} productos en el catálogo`);
   }
 
   async markFailed(documentId: string, message: string): Promise<void> {

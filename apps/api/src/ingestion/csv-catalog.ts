@@ -186,17 +186,46 @@ interface ProductRecord {
   codes: string[];
   images: string[];
   lines: string[];
+  /** Atributos ya formateados, para la tabla del catálogo. */
+  attrs: Record<string, string>;
   row: number;
 }
 
-function addLine(lines: string[], seen: Set<string>, label: string, value: string) {
+/** Fila del catálogo estructurado (un producto, sin agrupar variantes). */
+export interface CatalogItem {
+  row: number;
+  name: string;
+  code: string | null;
+  attributes: Record<string, string>;
+  /** Número inicial de cada atributo ("145 g/m² (±7%)" → 145), para filtros y orden. */
+  numbers: Record<string, number>;
+  image: string | null;
+}
+
+function addLine(
+  lines: string[],
+  seen: Set<string>,
+  label: string,
+  value: string,
+  attrs?: Record<string, string>,
+) {
   const v = clean(value);
   if (isEmpty(v)) return;
   const l = sentenceCase(label);
   const key = `${normHeader(l)}=${normHeader(v)}`;
   if (seen.has(key)) return;
   seen.add(key);
-  lines.push(`${l}: ${formatValue(l, v)}`);
+  const formatted = formatValue(l, v);
+  lines.push(`${l}: ${formatted}`);
+  if (attrs && !(l in attrs)) attrs[l] = formatted;
+}
+
+/** Número al inicio del valor: "150 cm (±3%)" → 150; "3,3 m/kg" → 3.3; "Algodón 100%" → null. */
+export function leadingNumber(value: string): number | null {
+  const m = /^\s*(-?\d+(?:[.,]\d+)?)/.exec(value);
+  if (!m) return null;
+  const n = Number(m[1].replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
 }
 
 function wooRecords(rows: Row[], headerIndex: number): ProductRecord[] {
@@ -234,19 +263,20 @@ function wooRecords(rows: Row[], headerIndex: number): ProductRecord[] {
     const name = clean(r[nameCol]);
     const short = clean(r[shortCol]);
     const lines: string[] = [];
+    const attrs: Record<string, string> = {};
     const seen = new Set<string>();
 
     for (const [ni, vi] of attrPairs) {
       const label = clean(r[ni]);
-      if (label) addLine(lines, seen, label, r[vi]);
+      if (label) addLine(lines, seen, label, r[vi], attrs);
     }
     if (catCol >= 0 && !lines.some((l) => /^categor/i.test(l))) {
-      addLine(lines, seen, 'Categoría', clean(r[catCol]).replace(/\s*>\s*/g, ' › '));
+      addLine(lines, seen, 'Categoría', clean(r[catCol]).replace(/\s*>\s*/g, ' › '), attrs);
     }
-    if (tagsCol >= 0) addLine(lines, seen, 'Etiquetas', r[tagsCol]);
-    if (priceCol >= 0) addLine(lines, seen, 'Precio', r[priceCol]);
-    if (saleCol >= 0) addLine(lines, seen, 'Precio rebajado', r[saleCol]);
-    if (descCol >= 0) addLine(lines, seen, 'Descripción', r[descCol].replace(/<[^>]+>/g, ' '));
+    if (tagsCol >= 0) addLine(lines, seen, 'Etiquetas', r[tagsCol], attrs);
+    if (priceCol >= 0) addLine(lines, seen, 'Precio', r[priceCol], attrs);
+    if (saleCol >= 0) addLine(lines, seen, 'Precio rebajado', r[saleCol], attrs);
+    if (descCol >= 0) addLine(lines, seen, 'Descripción', r[descCol].replace(/<[^>]+>/g, ' '), attrs);
 
     records.push({
       title: short || name || `Fila ${idx + 1}`,
@@ -256,6 +286,7 @@ function wooRecords(rows: Row[], headerIndex: number): ProductRecord[] {
         .map((s) => s.trim())
         .filter((s) => /^https?:\/\//.test(s)),
       lines,
+      attrs,
       row: idx + 1,
     });
   });
@@ -274,6 +305,7 @@ function genericRecords(rows: Row[], hasHeader: boolean): ProductRecord[] {
 
   return body.map((r, idx) => {
     const lines: string[] = [];
+    const attrs: Record<string, string> = {};
     const seen = new Set<string>();
     const images: string[] = [];
     r.forEach((cell, i) => {
@@ -283,15 +315,18 @@ function genericRecords(rows: Row[], hasHeader: boolean): ProductRecord[] {
         if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(v)) images.push(v);
         return;
       }
-      if (hasHeader && header[i]) addLine(lines, seen, header[i], v);
+      if (hasHeader && header[i]) addLine(lines, seen, header[i], v, attrs);
       else lines.push(v);
     });
-    const title = hasHeader ? lines[0]?.split(': ').slice(1).join(': ') ?? '' : lines[0] ?? '';
+    // El título es el primer valor; no se repite como "Columna: valor".
+    const title = hasHeader ? (lines[0]?.split(': ').slice(1).join(': ') ?? '') : (lines[0] ?? '');
+    const body = hasHeader ? lines.slice(1) : [lines.join(' | ')];
     return {
       title: title || `Fila ${idx + 1}`,
       codes: [],
       images,
-      lines: hasHeader ? lines : [lines.join(' | ')],
+      lines: body.length > 0 ? body : lines,
+      attrs: hasHeader ? attrs : {},
       row: idx + (hasHeader ? 2 : 1),
     };
   });
@@ -335,17 +370,36 @@ function toChunk(rec: ProductRecord): Chunk {
   };
 }
 
-export function csvToChunks(buffer: Buffer, options: CsvChunkOptions = {}): Chunk[] {
+function readRecords(buffer: Buffer): ProductRecord[] {
   const rows = parseDelimited(decodeCsv(buffer));
   if (rows.length === 0) return [];
-
   const wooHeader = rows.findIndex(isWooHeader);
-  let records: ProductRecord[];
-  if (wooHeader >= 0) records = wooRecords(rows, wooHeader);
-  else records = genericRecords(rows, looksLikeHeader(rows[0]) && rows.length > 1);
+  const records =
+    wooHeader >= 0
+      ? wooRecords(rows, wooHeader)
+      : genericRecords(rows, looksLikeHeader(rows[0]) && rows.length > 1);
+  return records.filter((r) => r.lines.length > 0);
+}
 
-  return groupVariants(
-    records.filter((r) => r.lines.length > 0),
-    options.maxCodesPerChunk ?? 40,
-  ).map(toChunk);
+export function csvToChunks(buffer: Buffer, options: CsvChunkOptions = {}): Chunk[] {
+  return groupVariants(readRecords(buffer), options.maxCodesPerChunk ?? 40).map(toChunk);
+}
+
+/**
+ * Productos para la tabla del catálogo: uno por fila (sin agrupar), para que
+ * conteos y filtros sean exactos. Vacío si el CSV no tiene encabezado.
+ */
+export function csvToCatalogItems(buffer: Buffer): CatalogItem[] {
+  return readRecords(buffer)
+    .filter((r) => Object.keys(r.attrs).length > 0)
+    .map((r) => {
+      const code = r.codes[0] ?? null;
+      const attributes: Record<string, string> = { Nombre: r.title, ...(code ? { 'Código': code } : {}), ...r.attrs };
+      const numbers: Record<string, number> = {};
+      for (const [k, v] of Object.entries(attributes)) {
+        const n = leadingNumber(v);
+        if (n !== null) numbers[k] = n;
+      }
+      return { row: r.row, name: r.title, code, attributes, numbers, image: r.images[0] ?? null };
+    });
 }

@@ -1,6 +1,13 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { csvToChunks, expandComposition, normalizeMeasure, parseDelimited } from './csv-catalog';
+import {
+  csvToCatalogItems,
+  csvToChunks,
+  expandComposition,
+  leadingNumber,
+  normalizeMeasure,
+  parseDelimited,
+} from './csv-catalog';
 
 // Datos sintéticos con la forma de una exportación de WooCommerce (no son datos reales).
 const WOO_HEADER = [
@@ -77,7 +84,7 @@ test('CSV genérico con encabezado: "Columna: valor" y sin columnas de flags', (
   const csv = 'Producto,Precio,Activo,Foto\nSilla,120,1,https://x.com/a.png\nMesa,300,0,\n';
   const chunks = csvToChunks(Buffer.from(csv));
   assert.equal(chunks.length, 2);
-  assert.equal(chunks[0].content, 'Silla\nProducto: Silla\nPrecio: 120');
+  assert.equal(chunks[0].content, 'Silla\nPrecio: 120');
   assert.deepEqual(chunks[0].metadata.images, ['https://x.com/a.png']);
 });
 
@@ -85,4 +92,26 @@ test('CSV en Windows-1252 (Excel) se decodifica bien', () => {
   const csv = Buffer.from('Nombre;Descripción\nCamión;Pequeño\n', 'latin1');
   const chunks = csvToChunks(csv);
   assert.match(chunks[0].content, /Descripción: Pequeño/);
+});
+
+test('leadingNumber toma el número inicial del valor', () => {
+  assert.equal(leadingNumber('150 cm (±3%)'), 150);
+  assert.equal(leadingNumber('3,3 m/kg (±7%)'), 3.3);
+  assert.equal(leadingNumber('Algodón 100%'), null);
+});
+
+test('catálogo estructurado: un producto por fila, sin agrupar, con números', () => {
+  const csv = [
+    WOO_HEADER,
+    wooRow('DISENO_V1', 'Tela Demo', 'Pol 94%-Spa 6%', '102 gr/m2. +/- 7%', 'Pieles'),
+    wooRow('DISENO_V2', 'Tela Demo', 'Pol 94%-Spa 6%', '102 gr/m2. +/- 7%', 'Pieles'),
+  ].join('\n');
+  const items = csvToCatalogItems(Buffer.from(csv));
+  assert.equal(items.length, 2);
+  assert.equal(items[0].code, 'DISENO_V1');
+  assert.equal(items[0].attributes['Composición'], 'Poliéster 94%, Spandex 6%');
+  assert.equal(items[0].attributes['Nombre'], 'Tela Demo');
+  assert.equal(items[0].numbers['Peso'], 102);
+  assert.equal(items[0].numbers['Composición'], undefined);
+  assert.equal(items[0].image, 'https://example.com/DISENO_V1.jpg');
 });

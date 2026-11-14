@@ -17,7 +17,9 @@ import { unwrap } from '../common/supabase-error';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { GeminiService, type ChatTurn } from './gemini.service';
-import { buildUserTurn, SYSTEM_INSTRUCTION, toSources, type RetrievedChunk } from './prompt';
+import { AnswerCacheService } from './answer-cache.service';
+import { createCatalogExecutor, loadCatalogContext, type CatalogToolCall } from './catalog-tools';
+import { buildUserTurn, diversify, SYSTEM_INSTRUCTION, toSources, type RetrievedChunk, type Source } from './prompt';
 
 class CreateConversationDto {
   @IsOptional()
@@ -34,6 +36,8 @@ class SendMessageDto {
 
 /** Fragmentos que se recuperan por pregunta. */
 const MATCH_COUNT = 10;
+/** Candidatos que se piden a la búsqueda antes de diversificar. */
+const MATCH_CANDIDATES = 30;
 /** Mensajes previos que se envían al modelo como historial. */
 const HISTORY_LIMIT = 10;
 const DEFAULT_TITLE = 'Nueva conversación';
@@ -46,6 +50,7 @@ export class ChatController {
     private readonly supabase: SupabaseService,
     private readonly embeddings: EmbeddingsService,
     private readonly gemini: GeminiService,
+    private readonly cache: AnswerCacheService,
   ) {}
 
   @Get('projects/:projectId/conversations')
@@ -86,7 +91,7 @@ export class ChatController {
     return unwrap(
       await db
         .from('messages')
-        .select('id, role, content, sources, created_at')
+        .select('id, role, content, sources, tool_calls, created_at')
         .eq('conversation_id', id)
         .order('created_at', { ascending: true }),
     );
@@ -103,11 +108,13 @@ export class ChatController {
   }
 
   /**
-   * Pregunta → embedding → búsqueda híbrida (con RLS) → Gemini en streaming.
+   * Pregunta → (caché) → embedding → búsqueda híbrida diversificada (RLS)
+   * → Gemini en streaming, con herramientas de catálogo si el proyecto tiene CSV.
    * Responde NDJSON (una línea JSON por evento):
    *   {"type":"sources","sources":[...]}
+   *   {"type":"tool","call":{...}}             (consultas exactas al catálogo)
    *   {"type":"delta","text":"..."}            (varias)
-   *   {"type":"done","messageId":"..."}
+   *   {"type":"done","messageId":"...","title":"...","cached":false}
    *   {"type":"error","message":"..."}
    */
   @Post('conversations/:conversationId/messages')
@@ -155,50 +162,88 @@ export class ChatController {
       if (!res.writableEnded) abort.abort();
     });
 
-    let answer = '';
-    try {
-      const queryEmbedding = await this.embeddings.embedQuery(question);
-      const { data: matches, error } = await db.rpc('match_document_chunks', {
-        p_project_id: conversation.project_id,
-        query_embedding: toPgVector(queryEmbedding),
-        query_text: question,
-        match_count: MATCH_COUNT,
-      });
-      if (error) throw new Error(`Búsqueda: ${error.message}`);
+    const projectId = conversation.project_id as string;
+    const title =
+      conversation.title === DEFAULT_TITLE
+        ? question.length > 60
+          ? `${question.slice(0, 57)}…`
+          : question
+        : conversation.title;
 
-      const chunks = (matches ?? []) as RetrievedChunk[];
-      const sources = toSources(chunks);
-      emit({ type: 'sources', sources });
-
-      const turns: ChatTurn[] = [...previous, { role: 'user', content: buildUserTurn(question, chunks) }];
-      for await (const text of this.gemini.stream(SYSTEM_INSTRUCTION, turns, abort.signal)) {
-        answer += text;
-        emit({ type: 'delta', text });
-      }
-
+    const finish = async (answer: string, sources: Source[], toolCalls: CatalogToolCall[], cached: boolean) => {
       const saved = unwrap(
         await db
           .from('messages')
-          .insert({ conversation_id: conversationId, role: 'assistant', content: answer, sources })
+          .insert({ conversation_id: conversationId, role: 'assistant', content: answer, sources, tool_calls: toolCalls })
           .select('id')
           .single(),
       );
-
-      // El título de la conversación sale de la primera pregunta.
-      const title =
-        conversation.title === DEFAULT_TITLE
-          ? question.length > 60
-            ? `${question.slice(0, 57)}…`
-            : question
-          : conversation.title;
       await db.from('conversations').update({ title }).eq('id', conversationId);
+      emit({ type: 'done', messageId: saved.id, title, cached });
+    };
 
-      emit({ type: 'done', messageId: saved.id, title });
+    let answer = '';
+    try {
+      // 1) Caché: solo para la primera pregunta de una conversación (sin historial).
+      let cacheKey: string | null = null;
+      if (this.cache.enabled && previous.length === 0) {
+        const version = await this.cache.contentVersion(db, projectId);
+        cacheKey = this.cache.key(projectId, version, question);
+        const hit = await this.cache.get(cacheKey);
+        if (hit) {
+          emit({ type: 'sources', sources: hit.sources });
+          for (const call of hit.toolCalls) emit({ type: 'tool', call });
+          emit({ type: 'delta', text: hit.answer });
+          await finish(hit.answer, hit.sources, hit.toolCalls, true);
+          return;
+        }
+      }
+
+      // 2) Búsqueda híbrida, diversificada para que un producto no acapare el contexto.
+      const queryEmbedding = await this.embeddings.embedQuery(question);
+      const { data: matches, error } = await db.rpc('match_document_chunks', {
+        p_project_id: projectId,
+        query_embedding: toPgVector(queryEmbedding),
+        query_text: question,
+        match_count: MATCH_CANDIDATES,
+      });
+      if (error) throw new Error(`Búsqueda: ${error.message}`);
+
+      const chunks = diversify((matches ?? []) as RetrievedChunk[], MATCH_COUNT);
+      const sources = toSources(chunks);
+      emit({ type: 'sources', sources });
+
+      // 3) Herramientas de catálogo (filtros exactos, conteos, rankings) si hay CSV procesados.
+      const catalog = await loadCatalogContext(db, projectId);
+      const toolCalls: CatalogToolCall[] = [];
+      const execute = catalog ? createCatalogExecutor(db, projectId, sources, toolCalls) : undefined;
+      const systemInstruction = catalog ? `${SYSTEM_INSTRUCTION}\n${catalog.instructions}` : SYSTEM_INSTRUCTION;
+
+      const turns: ChatTurn[] = [...previous, { role: 'user', content: buildUserTurn(question, chunks) }];
+      for await (const event of this.gemini.run(systemInstruction, turns, {
+        tools: catalog?.declarations,
+        execute,
+        signal: abort.signal,
+      })) {
+        if (event.type === 'text') {
+          answer += event.text;
+          emit({ type: 'delta', text: event.text });
+        } else {
+          emit({ type: 'tool', call: toolCalls[toolCalls.length - 1] });
+          // Las fuentes del catálogo se agregan a medida que el modelo consulta.
+          emit({ type: 'sources', sources });
+        }
+      }
+
+      await finish(answer, sources, toolCalls, false);
+      if (cacheKey && answer.trim()) {
+        await this.cache.put(cacheKey, projectId, question, { answer, sources, toolCalls });
+      }
     } catch (err) {
       if (abort.signal.aborted) {
         this.logger.warn(`Cliente canceló la respuesta en ${conversationId}`);
       } else {
-        this.logger.error(`Error en el chat ${conversationId}`, err as Error);
+        this.logger.error(`Error en el chat ${conversationId}: ${(err as Error).message}`, (err as Error).stack);
         emit({ type: 'error', message: 'No se pudo generar la respuesta. Intenta de nuevo.' });
       }
       if (answer) {
