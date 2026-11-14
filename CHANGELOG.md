@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.7.1] - 2026-11-14
+
+### Corregido
+
+- CORS: se permite el método `PUT`, necesario para guardar la clave de Gemini de la empresa y la configuración del asistente.
+
 ## [0.7.0] - 2026-11-14
 
 ### Agregado
