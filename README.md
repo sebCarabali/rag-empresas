@@ -33,6 +33,13 @@ Supabase Storage    Supabase Postgres + pgvector (RLS por empresa)
 - Solo el worker usa la `service_role` key.
 - El prompt trata los fragmentos como datos, no como instrucciones, para mitigar *prompt injection* desde documentos subidos.
 
+### Chat
+
+1. **Caché:** la primera pregunta de una conversación se busca en `answer_cache`. La clave combina el proyecto, la pregunta normalizada (sin tildes ni signos), el modelo y una versión del contenido (cantidad de documentos y su última modificación), así que subir, reprocesar o borrar un documento la invalida sola. Dura `ANSWER_CACHE_TTL_HOURS` (168 h por defecto; 0 la desactiva).
+2. **Búsqueda híbrida:** pide 30 candidatos y se queda con 10, con un máximo de 2 por producto, para que una tela con muchas variantes no acapare el contexto.
+3. **Gemini:** responde en streaming y puede llamar a las herramientas del catálogo (hasta 4 rondas). Las consultas que hace se muestran en el chat y se guardan en `messages.tool_calls`.
+4. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
+
 ### Flujo de un documento
 
 1. `POST /projects/:id/documents` registra el documento y devuelve una URL firmada.
@@ -125,5 +132,5 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 - Los PDF escaneados (imágenes) no tienen texto: necesitan OCR, que no está incluido.
 - Formatos soportados: PDF, DOCX, TXT, Markdown y CSV.
 - Los CSV se procesan por filas: un fragmento por producto con texto limpio («Columna: valor»). Las exportaciones de WooCommerce se reconocen solas (atributos en pares nombre/valor, aunque el encabezado no esté en la primera fila), las variantes con los mismos atributos se agrupan y las composiciones abreviadas se expanden (Pol → Poliéster, Alg → Algodón…).
-- El chat responde bien preguntas puntuales sobre un catálogo, pero no conteos ni listados completos, porque solo lee los fragmentos más relevantes.
+- Además, cada producto de un CSV se guarda en la tabla `catalog_items`. El chat le da a Gemini dos herramientas (`contar_productos` y `buscar_productos`) que ejecutan la función `search_catalog` con filtros exactos (menor, mayor, igual, contiene…), conteos agrupados y orden. Así responde bien preguntas como «telas de menos de 120 g/m²», «¿cuántas hay por submarca?» o «la más pesada». La función usa el JWT del usuario (RLS) y arma el SQL con `format(%L)`, sin riesgo de inyección.
 - Si cambias el modelo de embeddings por uno con otra dimensión, hay que ajustar `vector(384)` en la migración y reprocesar todos los documentos.
