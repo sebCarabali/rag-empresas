@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ACCEPTED_FILES, api, type DocumentItem, type DocumentStatus } from '@/lib/api';
+import { ACCEPTED_FILES, api, type DocumentItem, type DocumentStatus, type ReindexStatus } from '@/lib/api';
 import { UploadIcon } from './icons';
 import { Badge, ErrorText, SectionTitle, Spinner } from './ui';
 
@@ -77,6 +77,78 @@ function ProcessingProgress({ doc }: { doc: DocumentItem }) {
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Nombre corto del modelo: "Xenova/multilingual-e5-small" -> "multilingual-e5-small". */
+function shortModel(id: string): string {
+  return id.split('/').pop() ?? id;
+}
+
+/**
+ * Estado del índice de búsqueda: avisa mientras se reindexa (al cambiar de
+ * modelo de embeddings) y permite reindexar a mano.
+ */
+function SearchIndex({ projectId, hasDocuments }: { projectId: string; hasDocuments: boolean }) {
+  const [info, setInfo] = useState<ReindexStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+
+  const load = useCallback(() => api.reindexStatus(projectId).then(setInfo, () => undefined), [projectId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const running = info?.status === 'running';
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => void load(), 3000);
+    return () => clearInterval(timer);
+  }, [running, load]);
+
+  async function start() {
+    if (!confirm('Se recalculará el índice de búsqueda de todos los documentos. Mientras tanto, las respuestas pueden ser algo menos precisas. ¿Continuar?')) return;
+    setError(null);
+    setStarting(true);
+    try {
+      setInfo(await api.reindex(projectId));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  if (!info || !hasDocuments) return null;
+  return (
+    <div className="rounded-xl border border-line bg-[#fbfbfc] p-3 text-xs text-muted">
+      {running ? (
+        <>
+          <p className="font-medium text-ink-2">
+            Actualizando el índice de búsqueda · {info.done} de {info.total}
+          </p>
+          <p className="mt-0.5">Mientras termina, las respuestas usan sobre todo la búsqueda por palabras.</p>
+          <ProgressBar value={info.total ? info.done / info.total : 0} indeterminate={!info.total} />
+        </>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>
+            Índice: {shortModel(info.model)}
+            {info.reranker ? ' · reordenador activo' : ''}
+          </span>
+          <button
+            type="button"
+            className="font-medium text-brand hover:text-brand-hover disabled:opacity-60"
+            onClick={() => void start()}
+            disabled={starting}
+          >
+            {info.status === 'failed' ? 'Reintentar reindexado' : 'Reindexar'}
+          </button>
+        </div>
+      )}
+      {info.status === 'failed' && info.error && <p className="mt-1 text-red-700">{info.error}</p>}
+      {error && <p className="mt-1 text-red-700">{error}</p>}
+    </div>
+  );
 }
 
 export function DocumentsPanel({ projectId }: { projectId: string }) {
@@ -175,6 +247,7 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
         onChange={(e) => void onFiles(e.target.files)}
       />
       <ErrorText>{error}</ErrorText>
+      <SearchIndex projectId={projectId} hasDocuments={ready > 0} />
 
       <ul className="max-h-[50vh] space-y-2 overflow-y-auto xl:max-h-none">
         {uploading.map((u) => (

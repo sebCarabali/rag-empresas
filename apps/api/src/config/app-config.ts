@@ -58,9 +58,32 @@ export class AppConfig {
   /** Si Gemini no empieza a responder en este tiempo, se pasa a Groq. */
   readonly geminiFirstEventTimeoutMs = Number(optional('GEMINI_FIRST_EVENT_TIMEOUT_MS', '25000'));
 
-  readonly embeddingModel =optional('EMBEDDING_MODEL', 'Xenova/multilingual-e5-small');
-  /** Dimensión del vector: debe coincidir con document_chunks.embedding. */
-  readonly embeddingDimensions = 384;
+  /**
+   * Modelo de embeddings (Transformers.js, familia E5: usa prefijos query:/passage:).
+   * Cambiarlo exige reindexar: ver README, "Cambiar el modelo de embeddings".
+   */
+  readonly embeddingModel = optional('EMBEDDING_MODEL', 'Xenova/multilingual-e5-small');
+  /** Dimensión del vector: debe coincidir con document_chunks.embedding (384 small, 768 base, 1024 large). */
+  readonly embeddingDimensions = Number(optional('EMBEDDING_DIMENSIONS', '384'));
+  /** Precisión del modelo de embeddings: q8 (cuantizado, rápido) o fp32. */
+  readonly embeddingDtype = optional('EMBEDDING_DTYPE', 'q8');
+
+  /**
+   * Reordenador (cross-encoder) aplicado a los candidatos de la búsqueda antes
+   * de elegir los fragmentos que van al modelo. Licencia Apache 2.0.
+   */
+  readonly reranker = {
+    enabled: optional('RERANKER_ENABLED', 'true') === 'true',
+    model: optional('RERANKER_MODEL', 'cross-encoder/mmarco-mMiniLMv2-L12-H384-v1'),
+    /** Archivo ONNX dentro de onnx/ (sin extensión). Vacío = model.onnx. */
+    modelFile: (process.env.RERANKER_MODEL_FILE ?? 'model_quint8_avx2').trim(),
+    dtype: optional('RERANKER_DTYPE', 'fp32'),
+    maxLength: Number(optional('RERANKER_MAX_TOKENS', '384')),
+    /** Si el reordenador no termina en este tiempo, se usa el orden de la búsqueda. */
+    timeoutMs: Number(optional('RERANKER_TIMEOUT_MS', '6000')),
+    /** Candidatos que se reordenan. */
+    candidates: Math.min(30, Math.max(10, Number(optional('RERANKER_CANDIDATES', '30')))),
+  };
 
   readonly webOrigins = optional('WEB_ORIGIN', 'http://localhost:3000')
     .split(',')

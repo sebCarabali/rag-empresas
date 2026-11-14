@@ -135,6 +135,20 @@ export interface UsageReport {
   autoWarm: boolean;
 }
 
+export interface ReindexStatus {
+  model: string;
+  indexedWith: string | null;
+  status: 'running' | 'done' | 'failed' | null;
+  done: number;
+  total: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  outdated: boolean;
+  /** Modelo del reordenador, o null si está desactivado. */
+  reranker: string | null;
+}
+
 export interface WarmRun {
   id: string;
   status: 'queued' | 'running' | 'done' | 'failed' | 'skipped';
@@ -275,6 +289,8 @@ export const api = {
       'GET',
       `/projects/${projectId}/usage?days=${days}&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
     ),
+  reindexStatus: (projectId: string) => request<ReindexStatus>('GET', `/projects/${projectId}/reindex`),
+  reindex: (projectId: string) => request<ReindexStatus>('POST', `/projects/${projectId}/reindex`),
   warmRuns: (projectId: string) => request<WarmRun[]>('GET', `/projects/${projectId}/cache/warm`),
   warmCache: (projectId: string) => request<WarmRun>('POST', `/projects/${projectId}/cache/warm`),
   rateMessage: (messageId: string, rating: -1 | 1, comment?: string) =>

@@ -8,9 +8,11 @@ import { GroqService } from '../chat/groq.service';
 import { LlmService } from '../chat/llm.service';
 import { ChatbotsService } from '../chatbots/chatbots.service';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
+import { ReindexService } from '../embeddings/reindex.service';
 import { EnrichmentService } from '../enrichment/enrichment.service';
 import { EvalRunnerService } from '../evals/eval-runner.service';
 import { IngestionQueueService } from '../queue/ingestion-queue.service';
+import { RerankerService } from '../rerank/reranker.service';
 import { IngestionService } from './ingestion.service';
 import { OcrService } from './ocr.service';
 
@@ -20,6 +22,8 @@ import { OcrService } from './ocr.service';
  */
 const SHARED = [
   EmbeddingsService,
+  RerankerService,
+  ReindexService,
   IngestionService,
   IngestionQueueService,
   EnrichmentService,

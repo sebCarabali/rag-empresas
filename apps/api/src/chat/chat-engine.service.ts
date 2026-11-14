@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CompanyKeysService } from '../companies/company-keys.service';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
+import { ReindexService } from '../embeddings/reindex.service';
+import { RerankerService } from '../rerank/reranker.service';
 import { UsageService, type TokenUsage, type UsageChannel } from '../usage/usage.service';
 import { AnswerCacheService, type CachedAnswer, type SemanticFields } from './answer-cache.service';
 import { sameIntent } from './semantic-guard';
@@ -22,7 +24,7 @@ import {
 
 /** Fragmentos que se usan como contexto por pregunta. */
 const MATCH_COUNT = 10;
-/** Candidatos que se piden a la búsqueda antes de diversificar. */
+/** Candidatos que se piden a la búsqueda antes de reordenar y diversificar. */
 const MATCH_CANDIDATES = 30;
 
 export type Emit = (event: object) => void;
@@ -80,6 +82,8 @@ export class ChatEngineService {
     private readonly cache: AnswerCacheService,
     private readonly keys: CompanyKeysService,
     private readonly usage: UsageService,
+    private readonly reranker: RerankerService,
+    private readonly reindex: ReindexService,
   ) {}
 
   async ask(input: AskInput, onPartial?: (answer: string) => void): Promise<AskResult> {
@@ -223,6 +227,10 @@ export class ChatEngineService {
   ): Promise<Generated> {
     const { db, projectId, question, history, bot, emit, signal } = input;
 
+    // Si el proyecto se indexó con otro modelo de embeddings, se reindexa en segundo plano
+    // (mientras tanto la búsqueda por texto sigue funcionando).
+    void this.reindex.ensureCurrent(projectId);
+
     // 2) Búsqueda híbrida, diversificada para que un producto no acapare el contexto.
     const queryEmbedding = precomputedEmbedding ?? (await this.embeddings.embedQuery(question));
     const { data: matches, error } = await db.rpc('match_document_chunks', {
@@ -233,7 +241,10 @@ export class ChatEngineService {
     });
     if (error) throw new Error(`Búsqueda: ${error.message}`);
 
-    const chunks = diversify((matches ?? []) as RetrievedChunk[], MATCH_COUNT);
+    // 2b) Reordenador: lee pregunta y fragmento juntos y sube los que de verdad responden.
+    const { items: ranked, reranked, ms } = await this.reranker.rerank(question, (matches ?? []) as RetrievedChunk[]);
+    if (reranked) this.logger.debug(`Reordenados ${ranked.length} candidatos en ${ms} ms`);
+    const chunks = diversify(ranked, MATCH_COUNT);
     const sources = toSources(chunks);
 
     // Descripciones generales (web) de las familias que aparecen en la pregunta o los resultados.
