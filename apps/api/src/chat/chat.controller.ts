@@ -33,7 +33,7 @@ class SendMessageDto {
 }
 
 /** Fragmentos que se recuperan por pregunta. */
-const MATCH_COUNT = 8;
+const MATCH_COUNT = 10;
 /** Mensajes previos que se envían al modelo como historial. */
 const HISTORY_LIMIT = 10;
 const DEFAULT_TITLE = 'Nueva conversación';

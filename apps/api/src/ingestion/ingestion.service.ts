@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { chunkSections } from './chunker';
+import { chunkSections, type Chunk } from './chunker';
+import { csvToChunks } from './csv-catalog';
 import { extractText, UnsupportedFileError } from './text-extractor';
 
 export interface IngestionJob {
@@ -67,15 +68,19 @@ export class IngestionService {
       throw new PermanentIngestionError(`No se pudo descargar el archivo: ${dlError?.message ?? 'vacío'}`);
     }
 
-    let sections;
+    let chunks: Chunk[];
     try {
-      sections = await extractText(Buffer.from(await file.arrayBuffer()), doc.mime_type);
+      const buffer = Buffer.from(await file.arrayBuffer());
+      // Los CSV se procesan por filas (un fragmento por producto); el resto, por texto.
+      chunks =
+        doc.mime_type === 'text/csv'
+          ? csvToChunks(buffer)
+          : chunkSections(await extractText(buffer, doc.mime_type));
     } catch (err) {
       if (err instanceof UnsupportedFileError) throw new PermanentIngestionError(err.message);
       throw new PermanentIngestionError(`No se pudo leer el archivo: ${(err as Error).message}`);
     }
 
-    const chunks = chunkSections(sections);
     if (chunks.length === 0) {
       throw new PermanentIngestionError(
         'No se encontró texto en el archivo. Si es un PDF escaneado, necesita OCR.',
