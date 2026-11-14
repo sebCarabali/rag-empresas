@@ -3,6 +3,13 @@
  *
  *   <script src="https://<app>/widget.js" data-bot="bot_xxx" async></script>
  *
+ * Modo protegido (widget_auth = 'token'): además hace falta un token temporal
+ * que emite el servidor de la empresa con su clave secreta (POST /v1/widget-tokens):
+ *   data-token="wt1…"            token ya generado al armar la página, o
+ *   data-token-url="/chat-token"  URL del sitio de la empresa que devuelve {"token": "…"}
+ *                                 (permite renovarlo cuando vence).
+ * También se puede entregar después con window.RagWidget.setToken(token).
+ *
  * Crea un botón flotante con el color del asistente que abre el chat en un
  * iframe (/embed/<clave>). El iframe solo se deja mostrar en los dominios
  * autorizados (Content-Security-Policy: frame-ancestors, ver proxy.ts).
@@ -18,19 +25,46 @@ export function GET() {
   var base = new URL(script.src).origin;
   var api = ${JSON.stringify(apiUrl)};
   var side = script.getAttribute('data-position') === 'left' ? 'left' : 'right';
+  var token = script.getAttribute('data-token') || '';
+  var tokenUrl = script.getAttribute('data-token-url') || '';
+  var frame = null;
+
+  // Token del servidor de la empresa (modo protegido). Se pide a su propio sitio, con sus cookies.
+  function fetchToken() {
+    if (!tokenUrl) return Promise.resolve(token);
+    return fetch(tokenUrl, { credentials: 'include' }).then(function (r) {
+      if (!r.ok) throw new Error('No se pudo obtener el token del chat (' + r.status + ')');
+      return r.headers.get('content-type') && r.headers.get('content-type').indexOf('json') >= 0
+        ? r.json().then(function (j) { return j.token; })
+        : r.text();
+    }).then(function (t) { token = String(t || '').trim(); return token; });
+  }
+  function sendToken() {
+    if (frame && frame.contentWindow && token) frame.contentWindow.postMessage({ type: 'rag-widget-token', token: token }, base);
+  }
+  window.RagWidget = {
+    setToken: function (t) { token = String(t || ''); sendToken(); },
+  };
 
   fetch(api + '/widget/' + key + '/config').then(function (r) {
     if (!r.ok) throw new Error('Chatbot no disponible');
     return r.json();
-  }).then(function (cfg) { mount(cfg); }).catch(function (e) { console.warn('[widget]', e.message); });
+  }).then(function (cfg) {
+    if (cfg.auth !== 'token') return mount(cfg);
+    return fetchToken().then(function () {
+      if (!token) throw new Error('Modo protegido: falta data-token o data-token-url (token emitido por tu servidor)');
+      mount(cfg);
+    });
+  }).catch(function (e) { console.warn('[widget]', e.message); });
 
   function mount(cfg) {
     var color = /^#[0-9a-f]{6}$/i.test(cfg.primaryColor) ? cfg.primaryColor : '#0f172a';
     var root = document.createElement('div');
     root.style.cssText = 'position:fixed;bottom:20px;' + side + ':20px;z-index:2147483000;font-family:system-ui,sans-serif';
 
-    var frame = document.createElement('iframe');
-    frame.src = base + '/embed/' + key;
+    frame = document.createElement('iframe');
+    // El token va en el fragmento (#): no se envía al servidor ni queda en los registros.
+    frame.src = base + '/embed/' + key + (token ? '#t=' + encodeURIComponent(token) : '');
     frame.title = cfg.name || 'Asistente';
     frame.allow = 'clipboard-write';
     frame.style.cssText = 'display:none;border:0;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.18);' +
@@ -54,7 +88,12 @@ export function GET() {
     }
     button.addEventListener('click', function () { toggle(); });
     window.addEventListener('message', function (e) {
-      if (e.origin === base && e.data === 'rag-widget-close') toggle(false);
+      if (e.origin !== base) return;
+      if (e.data === 'rag-widget-close') toggle(false);
+      // El token venció: se pide uno nuevo al sitio de la empresa y se entrega al chat.
+      if (e.data && e.data.type === 'rag-widget-token-expired') {
+        fetchToken().then(sendToken).catch(function (err) { console.warn('[widget]', err.message); });
+      }
     });
 
     root.appendChild(frame);

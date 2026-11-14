@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { widgetApi } from '@/lib/api';
+import { WidgetTokenError, widgetApi } from '@/lib/api';
 import { FeedbackButtons } from './feedback-buttons';
 
 type WidgetConfig = Awaited<ReturnType<typeof widgetApi.config>>;
@@ -42,6 +42,33 @@ export function WidgetChat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<string | null>(null);
+  // Modo protegido: token temporal emitido por el servidor de la empresa (llega en el # del iframe).
+  const tokenRef = useRef<string | null>(null);
+  const tokenWaiters = useRef<Array<(token: string | null) => void>>([]);
+
+  useEffect(() => {
+    const fromHash = new URLSearchParams(window.location.hash.slice(1)).get('t');
+    if (fromHash) tokenRef.current = fromHash;
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== window.parent || !e.data || e.data.type !== 'rag-widget-token') return;
+      tokenRef.current = String(e.data.token || '') || null;
+      tokenWaiters.current.splice(0).forEach((resolve) => resolve(tokenRef.current));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  /** Pide un token nuevo al sitio que inserta el widget y espera hasta 6 s. */
+  function renewToken(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 6000);
+      tokenWaiters.current.push((t) => {
+        clearTimeout(timer);
+        resolve(t);
+      });
+      window.parent.postMessage({ type: 'rag-widget-token-expired' }, '*');
+    });
+  }
 
   useEffect(() => {
     widgetApi.config(publicKey).then(
@@ -78,20 +105,30 @@ export function WidgetChat() {
     abortRef.current = new AbortController();
     sessionRef.current ??= visitorSession();
     try {
-      await widgetApi.ask(
-        publicKey,
-        question,
-        history,
-        sessionRef.current,
-        (event) => {
-          if (event.type === 'delta') update((t) => ({ ...t, content: t.content + event.text }));
-          else if (event.type === 'reset') update((t) => ({ ...t, content: '' }));
-          else if (event.type === 'sources') update((t) => ({ ...t, sources: event.sources }));
-          else if (event.type === 'done') update((t) => ({ ...t, messageId: event.messageId ?? null, sessionId: event.sessionId }));
-          else if (event.type === 'error') setError(event.message);
-        },
-        abortRef.current.signal,
-      );
+      const ask = () =>
+        widgetApi.ask(
+          publicKey,
+          question,
+          history,
+          sessionRef.current!,
+          (event) => {
+            if (event.type === 'delta') update((t) => ({ ...t, content: t.content + event.text }));
+            else if (event.type === 'reset') update((t) => ({ ...t, content: '' }));
+            else if (event.type === 'sources') update((t) => ({ ...t, sources: event.sources }));
+            else if (event.type === 'done') update((t) => ({ ...t, messageId: event.messageId ?? null, sessionId: event.sessionId }));
+            else if (event.type === 'error') setError(event.message);
+          },
+          abortRef.current!.signal,
+          tokenRef.current,
+        );
+      try {
+        await ask();
+      } catch (err) {
+        if (!(err instanceof WidgetTokenError)) throw err;
+        // El token venció: se pide otro al sitio de la empresa y se reintenta una vez.
+        if (await renewToken()) await ask();
+        else setError('La sesión del chat venció. Recarga la página para seguir conversando.');
+      }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') setError('No se pudo conectar. Intenta de nuevo.');
     } finally {
@@ -168,7 +205,7 @@ export function WidgetChat() {
                 <FeedbackButtons
                   color={color}
                   onRate={(rating, comment) =>
-                    widgetApi.rate(publicKey, t.messageId!, t.sessionId!, rating, comment)
+                    widgetApi.rate(publicKey, t.messageId!, t.sessionId!, rating, comment, tokenRef.current)
                   }
                 />
               )}
