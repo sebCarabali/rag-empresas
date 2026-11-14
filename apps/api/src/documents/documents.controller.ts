@@ -184,7 +184,7 @@ export class DocumentsController {
     );
     const { error } = await this.supabase.admin.storage
       .from(this.config.storageBucket)
-      .remove([deleted.storage_path]);
+      .remove([deleted.storage_path, `${deleted.storage_path}.ocr.json`]);
     if (error) this.logger.error(`No se pudo borrar ${deleted.storage_path}: ${error.message}`);
   }
 }

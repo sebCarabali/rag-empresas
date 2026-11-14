@@ -87,7 +87,7 @@ export class ChatController {
     return unwrap(
       await db
         .from('messages')
-        .select('id, role, content, sources, tool_calls, model_info, created_at')
+        .select('id, role, content, sources, tool_calls, model_info, created_at, feedback:message_feedback(rating, comment)')
         .eq('conversation_id', id)
         .order('created_at', { ascending: true }),
     );
