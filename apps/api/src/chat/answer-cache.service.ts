@@ -46,7 +46,7 @@ export class AnswerCacheService {
       .trim();
   }
 
-  /** Versión del contenido del proyecto, leída con el cliente del usuario (RLS). */
+  /** Versión del contenido del proyecto (documentos y descripciones web), leída con el cliente del usuario (RLS). */
   async contentVersion(db: SupabaseClient, projectId: string): Promise<string> {
     const { data, error } = await db
       .from('documents')
@@ -58,8 +58,14 @@ export class AnswerCacheService {
       .from('documents')
       .select('id', { count: 'exact', head: true })
       .eq('project_id', projectId);
+    const { data: enriched } = await db
+      .from('catalog_enrichments')
+      .select('updated_at')
+      .eq('project_id', projectId)
+      .order('updated_at', { ascending: false })
+      .limit(1);
     if (error) throw new Error(error.message);
-    return `${count ?? 0}:${data?.[0]?.updated_at ?? 'none'}`;
+    return `${count ?? 0}:${data?.[0]?.updated_at ?? 'none'}:${enriched?.[0]?.updated_at ?? 'none'}`;
   }
 
   key(projectId: string, version: string, question: string): string {

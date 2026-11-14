@@ -239,10 +239,22 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               {message.sources.map((s) => (
                 <li key={s.index} className="rounded-md bg-white p-2">
                   <p className="font-medium">
+                    {s.kind === 'web' && (
+                      <span className="mr-1 rounded bg-amber-100 px-1 text-[10px] uppercase text-amber-800">web</span>
+                    )}
                     [{s.index}] {s.documentName}
                     {s.page ? ` · página ${s.page}` : ''}
                   </p>
                   <p className="mt-1 text-slate-500">{s.snippet}</p>
+                  {s.links && s.links.length > 0 && (
+                    <p className="mt-1 flex flex-wrap gap-x-2">
+                      {s.links.map((l) => (
+                        <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">
+                          {l.title}
+                        </a>
+                      ))}
+                    </p>
+                  )}
                 </li>
               ))}
             </ol>

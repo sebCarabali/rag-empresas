@@ -191,6 +191,7 @@ export function createCatalogExecutor(
           documentId: '',
           documentName: 'Catálogo',
           chunkIndex: -1,
+          kind: 'catalog',
           snippet: `${p.nombre}${p.codigo ? ` (${p.codigo})` : ''} — ${attrs}`.slice(0, 280),
         });
       }

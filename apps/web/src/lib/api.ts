@@ -44,6 +44,19 @@ export interface Source {
   documentName: string;
   page?: number;
   snippet: string;
+  kind?: 'document' | 'catalog' | 'web';
+  links?: Array<{ title: string; url: string }>;
+}
+
+export interface Enrichment {
+  id: number;
+  field: string;
+  value: string;
+  description: string | null;
+  sources: Array<{ title: string; url: string }>;
+  status: 'pending' | 'ready' | 'failed';
+  error: string | null;
+  updated_at: string;
 }
 
 /** Consulta exacta que el asistente hizo al catálogo estructurado. */
@@ -128,6 +141,11 @@ export const api = {
     }
     return api.processDocument(document.id);
   },
+
+  enrichments: (projectId: string) =>
+    request<{ enabled: boolean; fields: string[]; items: Enrichment[] }>('GET', `/projects/${projectId}/enrichments`),
+  refreshEnrichments: (projectId: string, force = false) =>
+    request<{ queued: boolean }>('POST', `/projects/${projectId}/enrichments/refresh`, { force }),
 
   conversations: (projectId: string) => request<Conversation[]>('GET', `/projects/${projectId}/conversations`),
   createConversation: (projectId: string) =>

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ChatPanel } from './chat-panel';
 import { DocumentsPanel } from './documents-panel';
+import { EnrichmentsPanel } from './enrichments-panel';
 import { Header } from './header';
 import { ErrorText, Spinner } from './ui';
 import { api, type Project } from '@/lib/api';
@@ -51,8 +52,11 @@ export function ProjectView() {
         {!project && !error && <Spinner />}
         {project && (
           <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[320px_1fr]">
-            <div className="min-h-0">
-              <DocumentsPanel projectId={project.id} />
+            <div className="flex min-h-0 flex-col gap-4">
+              <div className="min-h-0 flex-1">
+                <DocumentsPanel projectId={project.id} />
+              </div>
+              <EnrichmentsPanel projectId={project.id} />
             </div>
             <div className="min-h-[60vh] lg:min-h-0">
               <ChatPanel projectId={project.id} />

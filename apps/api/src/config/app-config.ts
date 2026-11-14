@@ -71,6 +71,14 @@ export class AppConfig {
 
   readonly maxUploadBytes = 50 * 1024 * 1024;
 
+  /** Descripciones web (Gemini + Google Search) de familias de producto al procesar CSV. */
+  readonly webEnrichment = optional('WEB_ENRICHMENT', 'true') === 'true';
+  /** Campos del catálogo cuyos valores se describen con la web (sin distinguir tildes/mayúsculas). */
+  readonly enrichFields = optional('ENRICH_FIELDS', 'Familia,Tipo de tejido')
+    .split(',')
+    .map((f) => f.trim())
+    .filter(Boolean);
+
   /** Horas que dura una respuesta en caché. 0 desactiva la caché. */
   readonly answerCacheTtlHours = Number(optional('ANSWER_CACHE_TTL_HOURS', '168'));
 }
