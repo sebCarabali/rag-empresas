@@ -67,12 +67,21 @@ export interface ToolCall {
   error?: string;
 }
 
+/** Modelo que generó la respuesta; fallback = se usó el respaldo (Groq). */
+export interface ModelInfo {
+  provider: 'gemini' | 'groq';
+  model: string;
+  fallback: boolean;
+  reason?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   sources: Source[];
   tool_calls?: ToolCall[];
+  model_info?: ModelInfo | null;
   created_at: string;
 }
 
@@ -161,6 +170,8 @@ export const api = {
       onSources: (sources: Source[]) => void;
       onDelta: (text: string) => void;
       onTool: (call: ToolCall) => void;
+      onModel: (info: ModelInfo) => void;
+      onReset: () => void;
       onDone: (info: { messageId: string; title: string; cached: boolean }) => void;
       onError: (message: string) => void;
     },
@@ -193,6 +204,8 @@ export const api = {
         if (event.type === 'sources') handlers.onSources(event.sources);
         else if (event.type === 'delta') handlers.onDelta(event.text);
         else if (event.type === 'tool') handlers.onTool(event.call);
+        else if (event.type === 'model') handlers.onModel(event.info);
+        else if (event.type === 'reset') handlers.onReset();
         else if (event.type === 'done') handlers.onDone(event);
         else if (event.type === 'error') handlers.onError(event.message);
       }
