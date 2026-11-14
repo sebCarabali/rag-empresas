@@ -26,6 +26,9 @@ export default function Home() {
           >
             Empezar con tu correo
           </Link>
+          <Link href="/docs/widget" className="text-sm font-medium text-brand hover:text-brand-hover">
+            Guía: pon el asistente en tu sitio web →
+          </Link>
         </div>
       </section>
       <ProductPanel />

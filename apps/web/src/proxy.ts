@@ -2,6 +2,8 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 const PUBLIC_PATHS = ['/', '/login', '/auth/callback'];
+/** Prefijos públicos (documentación). */
+const PUBLIC_PREFIXES = ['/docs'];
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
 /**
@@ -37,6 +39,8 @@ export async function proxy(request: NextRequest) {
   const { pathname: path } = request.nextUrl;
   // Rutas públicas del widget: sin sesión ni cookies.
   if (path === '/widget.js') return NextResponse.next({ request });
+  // Documentación pública: no necesita la sesión.
+  if (PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return NextResponse.next({ request });
   const embed = /^\/embed\/([^/]+)\/?$/.exec(path);
   if (embed) return embedResponse(request, embed[1]);
 
