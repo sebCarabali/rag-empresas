@@ -42,10 +42,17 @@ export class SupabaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Falta el token de acceso');
     }
 
-    const { data, error } = await this.supabase.admin.auth.getClaims(token);
-    if (error || !data?.claims?.sub) {
+    let claims: { sub?: string; email?: unknown } | undefined;
+    try {
+      const { data, error } = await this.supabase.admin.auth.getClaims(token);
+      if (!error) claims = data?.claims;
+    } catch {
+      // Token malformado: getClaims puede lanzar en lugar de devolver error.
+    }
+    if (!claims?.sub) {
       throw new UnauthorizedException('Token inválido o vencido');
     }
+    const data = { claims: { ...claims, sub: claims.sub } };
 
     request.user = {
       id: data.claims.sub,
