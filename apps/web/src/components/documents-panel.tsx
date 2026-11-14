@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACCEPTED_FILES, api, type DocumentItem, type DocumentStatus } from '@/lib/api';
-import { Button, ErrorText, Spinner } from './ui';
+import { UploadIcon } from './icons';
+import { Badge, ErrorText, SectionTitle, Spinner } from './ui';
 
-const STATUS_LABEL: Record<DocumentStatus, { text: string; className: string }> = {
-  uploading: { text: 'Subiendo', className: 'bg-slate-100 text-slate-600' },
-  pending: { text: 'En cola', className: 'bg-amber-100 text-amber-800' },
-  processing: { text: 'Procesando', className: 'bg-blue-100 text-blue-800' },
-  ready: { text: 'Listo', className: 'bg-emerald-100 text-emerald-800' },
-  failed: { text: 'Error', className: 'bg-red-100 text-red-700' },
+const STATUS_LABEL: Record<DocumentStatus, { text: string; tone: 'neutral' | 'ok' | 'warn' | 'brand' | 'danger' }> = {
+  uploading: { text: 'Subiendo', tone: 'neutral' },
+  pending: { text: 'En cola', tone: 'warn' },
+  processing: { text: 'Procesando', tone: 'brand' },
+  ready: { text: 'Listo', tone: 'ok' },
+  failed: { text: 'Error', tone: 'danger' },
 };
 
 const STAGE_LABEL: Record<NonNullable<DocumentItem['progress_stage']>, string> = {
@@ -36,14 +37,14 @@ function formatDuration(ms: number): string {
 function ProgressBar({ value, indeterminate }: { value: number; indeterminate?: boolean }) {
   return (
     <div
-      className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"
+      className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#eef0f3]"
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={indeterminate ? undefined : Math.round(value * 100)}
     >
       <div
-        className={`h-full rounded-full bg-blue-600 transition-[width] duration-500 ${indeterminate ? 'w-1/3 animate-pulse' : ''}`}
+        className={`h-full rounded-full bg-brand transition-[width] duration-500 ${indeterminate ? 'w-1/3 animate-pulse' : ''}`}
         style={indeterminate ? undefined : { width: `${Math.max(2, Math.min(100, value * 100))}%` }}
       />
     </div>
@@ -63,7 +64,7 @@ function ProcessingProgress({ doc }: { doc: DocumentItem }) {
   }
   return (
     <div className="mt-1">
-      <p className="text-xs text-slate-600">
+      <p className="text-xs text-muted">
         {STAGE_LABEL[stage]}
         {counting && ` · ${done.toLocaleString('es')} de ${total.toLocaleString('es')} fragmentos (${Math.floor((done / total) * 100)} %)`}
         {eta && ` · faltan ~${eta}`}
@@ -147,30 +148,39 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
     }
   }
 
+  const ready = documents?.filter((d) => d.status === 'ready').length ?? 0;
   return (
-    <section className="flex h-full flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-semibold">Documentos</h2>
-        <Button variant="secondary" onClick={() => inputRef.current?.click()} disabled={uploading.length > 0}>
-          {uploading.length ? 'Subiendo…' : 'Subir archivos'}
-        </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={ACCEPTED_FILES}
-          className="hidden"
-          onChange={(e) => void onFiles(e.target.files)}
-        />
-      </div>
-      <p className="text-xs text-slate-500">PDF (también escaneados), Word, Excel (.xlsx), CSV, TXT, Markdown o imágenes (PNG, JPG, WebP) · máximo 50 MB. Los escaneos e imágenes se leen con OCR de Gemini.</p>
+    <section className="flex flex-col gap-4 rounded-2xl border border-line bg-white p-5">
+      <SectionTitle aside={documents && <span className="text-xs text-muted">{ready} listo{ready === 1 ? '' : 's'}</span>}>
+        Documentos
+      </SectionTitle>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading.length > 0}
+        className="flex flex-col items-center gap-1.5 rounded-xl border-[1.5px] border-dashed border-line-strong bg-[#fbfbfc] px-4 py-5 text-center text-[13px] text-ink-2 transition hover:border-brand hover:bg-brand-soft disabled:opacity-60"
+      >
+        <UploadIcon size={22} />
+        <span>
+          <strong>{uploading.length ? 'Subiendo…' : 'Sube archivos'}</strong>
+        </span>
+        <span className="text-xs text-muted">PDF (también escaneados), Word, Excel, CSV, TXT, Markdown o imágenes · 50 MB</span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={ACCEPTED_FILES}
+        className="hidden"
+        onChange={(e) => void onFiles(e.target.files)}
+      />
       <ErrorText>{error}</ErrorText>
 
-      <ul className="flex-1 space-y-2 overflow-y-auto">
+      <ul className="max-h-[50vh] space-y-2 overflow-y-auto xl:max-h-none">
         {uploading.map((u) => (
-          <li key={u.name} className="rounded-lg border border-dashed border-slate-300 p-3 text-sm">
-            <p className="truncate font-medium text-slate-700" title={u.name}>{u.name}</p>
-            <p className="text-xs text-slate-500">
+          <li key={u.name} className="rounded-xl border border-line p-3 text-sm">
+            <p className="truncate font-medium text-ink-2" title={u.name}>{u.name}</p>
+            <p className="text-xs text-muted">
               {u.loaded === 0
                 ? 'Esperando para subir…'
                 : u.loaded >= u.total
@@ -182,35 +192,35 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
         ))}
         {!documents && !error && <Spinner />}
         {documents?.length === 0 && uploading.length === 0 && (
-          <li className="text-sm text-slate-500">Sube documentos para empezar a consultarlos.</li>
+          <li className="text-sm text-muted">Sube documentos para empezar a consultarlos.</li>
         )}
         {documents?.map((doc) => {
           const status = STATUS_LABEL[doc.status];
           return (
-            <li key={doc.id} className="rounded-lg border border-slate-200 bg-white p-3">
+            <li key={doc.id} className="rounded-xl border border-line p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium" title={doc.name}>
                     {doc.name}
                   </p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-muted">
                     {formatSize(doc.size_bytes)}
                     {doc.chunk_count > 0 && ` · ${doc.chunk_count} fragmentos`}
                   </p>
                 </div>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
-                  {status.text}
+                <span className="shrink-0">
+                  <Badge tone={status.tone}>{status.text}</Badge>
                 </span>
               </div>
               {(doc.status === 'pending' || doc.status === 'processing') && <ProcessingProgress doc={doc} />}
-              {doc.error && <p className="mt-2 text-xs text-red-600">{doc.error}</p>}
+              {doc.error && <p className="mt-2 text-xs text-red-700">{doc.error}</p>}
               <div className="mt-2 flex gap-3 text-xs">
                 {(doc.status === 'failed' || doc.status === 'ready' || doc.status === 'uploading') && (
-                  <button className="text-slate-600 hover:text-slate-900" onClick={() => void reprocess(doc)}>
+                  <button type="button" className="font-medium text-brand hover:text-brand-hover" onClick={() => void reprocess(doc)}>
                     {doc.status === 'ready' ? 'Reprocesar' : 'Reintentar'}
                   </button>
                 )}
-                <button className="text-red-600 hover:text-red-800" onClick={() => void remove(doc)}>
+                <button type="button" className="text-red-700 hover:text-red-900" onClick={() => void remove(doc)}>
                   Eliminar
                 </button>
               </div>

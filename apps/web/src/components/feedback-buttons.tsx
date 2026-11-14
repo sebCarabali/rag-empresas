@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ThumbDownIcon, ThumbUpIcon } from './icons';
 
 type Rating = -1 | 1;
 
@@ -50,42 +51,44 @@ export function FeedbackButtons({
     }
   }
 
-  const button = (value: Rating, label: string, icon: string) => (
+  const button = (value: Rating, label: string, Icon: typeof ThumbUpIcon) => (
     <button
       type="button"
       onClick={() => void rate(value)}
       aria-label={label}
       aria-pressed={rating === value}
       title={label}
-      className={`rounded px-1.5 py-0.5 text-sm transition ${rating === value ? 'bg-white shadow-sm' : 'opacity-50 hover:opacity-100'}`}
-      style={rating === value ? { outline: `1px solid ${color}` } : undefined}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition ${
+        rating === value ? 'border-transparent text-white' : 'border-line bg-white text-ink-2 hover:bg-canvas'
+      }`}
+      style={rating === value ? { background: color } : undefined}
     >
-      {icon}
+      <Icon size={15} />
     </button>
   );
 
   return (
-    <div className="mt-2 text-xs text-slate-500">
-      <div className="flex items-center gap-1">
-        {button(1, 'Respuesta útil', '👍')}
-        {button(-1, 'Respuesta incorrecta o incompleta', '👎')}
+    <div className="text-xs text-muted">
+      <div className="flex items-center gap-1.5">
+        {button(1, 'Respuesta útil', ThumbUpIcon)}
+        {button(-1, 'Respuesta incorrecta o incompleta', ThumbDownIcon)}
         {saved && <span className="ml-1">¡Gracias!</span>}
-        {error && <span className="ml-1 text-red-600">No se pudo guardar</span>}
+        {error && <span className="ml-1 text-red-700">No se pudo guardar</span>}
       </div>
       {editing && (
-        <div className="mt-1 flex gap-1">
+        <div className="mt-2 flex gap-1.5">
           <input
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void sendComment()}
             maxLength={1000}
             placeholder={rating === -1 ? '¿Qué estuvo mal o faltó? (opcional)' : 'Comentario (opcional)'}
-            className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:border-slate-500"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-line-strong bg-white px-2.5 text-[13px] text-ink-2 outline-none focus:border-brand"
           />
           <button
             type="button"
             onClick={() => void sendComment()}
-            className="rounded px-2 py-1 text-xs text-white"
+            className="h-9 rounded-lg px-3 text-xs font-medium text-white"
             style={{ background: color }}
           >
             Enviar
