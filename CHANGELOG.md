@@ -2,6 +2,17 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.2.0] - 2026-11-14
+
+### Agregado
+
+- Procesamiento de CSV por filas: un fragmento por producto con texto limpio. Soporta exportaciones de WooCommerce (encabezado en cualquier fila, atributos en pares), agrupa variantes idénticas, expande abreviaturas de composición textil y normaliza medidas.
+- El chat recupera 10 fragmentos por pregunta.
+
+### Cambiado
+
+- Versionado sin tags de git (ver CONTRIBUTING.md).
+
 ## [0.1.2] - 2026-11-14
 
 ### Corregido

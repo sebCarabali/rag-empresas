@@ -2,7 +2,8 @@ import type { TextSection } from './text-extractor';
 
 export interface Chunk {
   content: string;
-  metadata: { page?: number };
+  /** Datos extra que se guardan con el fragmento (página, códigos, imágenes…). */
+  metadata: { page?: number; [key: string]: unknown };
 }
 
 export interface ChunkOptions {
