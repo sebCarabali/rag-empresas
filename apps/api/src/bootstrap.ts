@@ -11,7 +11,7 @@ export async function createApp(): Promise<INestApplication> {
 
   app.enableCors({
     origin: config.webOrigins,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type'],
     maxAge: 86400,
   });
