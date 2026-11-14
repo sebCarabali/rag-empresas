@@ -2,6 +2,19 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.3.0] - 2026-11-14
+
+### Agregado
+
+- Catálogo estructurado: los productos de cada CSV se guardan en `catalog_items` y el chat puede filtrarlos, contarlos y ordenarlos con exactitud (herramientas `contar_productos` y `buscar_productos` de Gemini). Responde bien filtros numéricos, conteos, listados y rankings.
+- Caché de respuestas para la primera pregunta de cada conversación (`ANSWER_CACHE_TTL_HOURS`, 168 h por defecto). Se invalida al subir, reprocesar o borrar documentos.
+- El chat muestra las consultas que hizo al catálogo y si la respuesta vino de la caché.
+
+### Cambiado
+
+- La búsqueda híbrida limita a 2 fragmentos por producto para que un solo producto no acapare los resultados.
+- El asistente ya no afirma que algo «no existe» a partir de resultados parciales.
+
 ## [0.2.0] - 2026-11-14
 
 ### Agregado
