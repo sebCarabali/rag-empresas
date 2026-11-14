@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { FunctionDeclaration } from '@google/genai';
 import { AppConfig } from '../config/app-config';
-import { GeminiService, type ChatTurn, type GeminiEvent, type ToolExecutor } from './gemini.service';
+import { GeminiEmptyAnswerError, GeminiService, type ChatTurn, type GeminiEvent, type ToolExecutor } from './gemini.service';
 import { GroqService } from './groq.service';
 
 /** Modelo que respondió (se muestra en el chat y se guarda con el mensaje). */
@@ -27,6 +27,7 @@ class FirstEventTimeout extends Error {}
 /** Traduce el error del proveedor a un motivo comprensible para el usuario. */
 export function describeFailure(err: unknown): string {
   if (err instanceof FirstEventTimeout) return 'Gemini no respondió a tiempo';
+  if (err instanceof GeminiEmptyAnswerError) return 'Gemini no generó una respuesta';
   const raw = `${(err as { status?: number })?.status ?? ''} ${(err as Error)?.message ?? String(err)}`;
   if (/429|quota|exhausted|rate limit|resource_exhausted/i.test(raw)) return 'Gemini agotó su cuota';
   if (/401|403|api key|permission|unauthenticated/i.test(raw)) return 'la clave de Gemini no es válida o no tiene permisos';
