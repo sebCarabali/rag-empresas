@@ -2,6 +2,14 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.4.0] - 2026-11-14
+
+### Agregado
+
+- Descripciones web de cada familia y tipo de tela (Gemini con Google Search), generadas una vez al procesar un CSV y guardadas en `catalog_enrichments`. El chat las usa para explicar las telas, marcadas como información general y con sus enlaces.
+- Panel «Descripciones web» en el proyecto para revisarlas y regenerarlas.
+- La raíz de la API (`/`) responde con su estado.
+
 ## [0.3.0] - 2026-11-14
 
 ### Agregado
