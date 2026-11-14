@@ -2,6 +2,19 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.7.0] - 2026-11-14
+
+### Agregado
+
+- Asistente personalizable por proyecto: nombre, color, logo, bienvenida, preguntas sugeridas, idioma e instrucciones de tono. Se aplica al chat de la app y al widget.
+- Widget para el sitio web de la empresa (`widget.js` + `/embed/<clave>`), con dominios autorizados (CSP `frame-ancestors`), límite por visitante, tope diario de mensajes y opción de ocultar fuentes.
+- Clave de Gemini propia por empresa, verificada antes de guardarse y cifrada en Supabase Vault; nunca se devuelve al navegador.
+
+### Cambiado
+
+- La lógica de respuesta del chat pasa a `ChatEngineService`, compartido entre la app y el widget.
+- La caché separa las respuestas por personalización del asistente.
+
 ## [0.6.0] - 2026-11-14
 
 ### Agregado

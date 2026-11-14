@@ -89,9 +89,15 @@ export class AnswerCacheService {
     return `${count ?? 0}:${data?.[0]?.updated_at ?? 'none'}:${enriched?.[0]?.updated_at ?? 'none'}`;
   }
 
-  key(projectId: string, version: string, question: string): string {
+  /**
+   * @param variant identifica la personalización (nombre, idioma, instrucciones, app/widget):
+   *   si cambia, la respuesta puede cambiar, así que se cachea aparte.
+   */
+  key(projectId: string, version: string, question: string, variant = ''): string {
     return createHash('sha256')
-      .update([CACHE_SCHEMA_VERSION, projectId, version, this.config.geminiModel, AnswerCacheService.normalizeQuestion(question)].join('|'))
+      .update(
+        [CACHE_SCHEMA_VERSION, projectId, version, this.config.geminiModel, variant, AnswerCacheService.normalizeQuestion(question)].join('|'),
+      )
       .digest('hex');
   }
 

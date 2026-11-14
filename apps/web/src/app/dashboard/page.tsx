@@ -148,7 +148,17 @@ function Projects({ company }: { company: Company }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">{company.name}</h1>
-        <p className="text-sm text-slate-500">Proyectos de la empresa · tu rol: {company.role}</p>
+        <p className="text-sm text-slate-500">
+          Proyectos de la empresa · tu rol: {company.role}
+          {canManage && (
+            <>
+              {' · '}
+              <Link href={`/companies/${company.id}/settings`} className="font-medium text-slate-700 underline hover:text-slate-900">
+                Configuración de la empresa
+              </Link>
+            </>
+          )}
+        </p>
       </div>
 
       {canManage && (
