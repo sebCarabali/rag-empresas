@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Logger, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../common/supabase-error';
@@ -32,6 +32,8 @@ const PROJECT_COLUMNS = 'id, company_id, name, description, created_at, updated_
 
 @Controller()
 export class ProjectsController {
+  private readonly logger = new Logger(ProjectsController.name);
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
@@ -105,7 +107,7 @@ export class ProjectsController {
       const { error } = await this.supabase.admin.storage
         .from(this.config.storageBucket)
         .remove(docs.map((d) => d.storage_path));
-      if (error) console.error('No se pudieron borrar algunos archivos', error);
+      if (error) this.logger.error(`No se pudieron borrar archivos del proyecto ${projectId}: ${error.message}`);
     }
   }
 }
