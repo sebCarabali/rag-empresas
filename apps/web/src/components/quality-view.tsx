@@ -13,12 +13,14 @@ import {
   type WidgetMessage,
 } from '@/lib/api';
 import { Header } from './header';
+import { UsageTab } from './usage-tab';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
 
-type Tab = 'feedback' | 'widget' | 'evals';
+type Tab = 'usage' | 'feedback' | 'widget' | 'evals';
 type RatingFilter = 'all' | 'up' | 'down';
 
 const TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'usage', label: 'Uso y caché' },
   { id: 'feedback', label: 'Valoraciones del equipo' },
   { id: 'widget', label: 'Preguntas del sitio web' },
   { id: 'evals', label: 'Pruebas automáticas' },
@@ -40,7 +42,7 @@ const splitList = (text: string) =>
 export function QualityView() {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState('');
-  const [tab, setTab] = useState<Tab>('feedback');
+  const [tab, setTab] = useState<Tab>('usage');
 
   useEffect(() => {
     api.project(projectId).then((p) => setProjectName(p.name), () => undefined);
@@ -69,6 +71,7 @@ export function QualityView() {
             </button>
           ))}
         </nav>
+        {tab === 'usage' && <UsageTab projectId={projectId} />}
         {tab === 'feedback' && <FeedbackTab projectId={projectId} />}
         {tab === 'widget' && <WidgetTab projectId={projectId} />}
         {tab === 'evals' && <EvalsTab projectId={projectId} />}

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { geminiClient } from '../chat/gemini.service';
 import { CompanyKeysService } from '../companies/company-keys.service';
 import { AppConfig } from '../config/app-config';
+import { geminiUsage, UsageService, type TokenUsage } from '../usage/usage.service';
 import { SupabaseService } from '../supabase/supabase.service';
 
 /** Trabajo de la cola: generar descripciones web para un proyecto. */
@@ -23,6 +24,7 @@ export interface WebDescription {
   description: string;
   sources: Array<{ title: string; url: string }>;
   queries: string[];
+  usage?: TokenUsage | null;
 }
 
 /** Margen bajo el límite de la función para encolar el resto. */
@@ -44,6 +46,7 @@ export class EnrichmentService {
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
     private readonly keys: CompanyKeysService,
+    private readonly usage: UsageService,
   ) {
     this.ai = geminiClient(config.geminiApiKey);
   }
@@ -91,7 +94,18 @@ export class EnrichmentService {
       }
       const info = byKey.get(`${row.field}\u0000${row.value}`);
       try {
+        const callStarted = Date.now();
         const result = await this.describe(row.field, row.value, info?.contexto ?? {}, companyKey);
+        void this.usage.record({
+          companyId: project.company_id,
+          projectId: project.id,
+          channel: 'enrich',
+          provider: 'gemini',
+          model: this.config.geminiModel,
+          keyOwner: companyKey ? 'company' : 'platform',
+          usage: result.usage,
+          durationMs: Date.now() - callStarted,
+        });
         await db
           .from('catalog_enrichments')
           .update({
@@ -170,7 +184,7 @@ export class EnrichmentService {
       sources.push({ title: chunk.web?.title || chunk.web?.domain || 'Fuente web', url });
       if (sources.length === MAX_SOURCES) break;
     }
-    return { description, sources, queries: meta?.webSearchQueries ?? [] };
+    return { description, sources, queries: meta?.webSearchQueries ?? [], usage: geminiUsage(response.usageMetadata) };
   }
 }
 

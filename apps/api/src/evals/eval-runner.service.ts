@@ -72,6 +72,7 @@ export class EvalRunnerService {
           emit: () => undefined,
           signal: new AbortController().signal,
           useCache: false,
+          channel: 'eval',
         });
         answer = result.answer;
         modelInfo = result.modelInfo;

@@ -9,6 +9,7 @@ import { DocumentsController } from './documents/documents.controller';
 import { EnrichmentsController } from './enrichment/enrichments.controller';
 import { EvalsController } from './evals/evals.controller';
 import { FeedbackController } from './chat/feedback.controller';
+import { UsageController } from './usage/usage.controller';
 import { HealthController } from './health.controller';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { ProjectsController } from './projects/projects.controller';
@@ -16,7 +17,7 @@ import { CoreModule } from './supabase/supabase.module';
 
 @Module({
   imports: [CoreModule, IngestionModule],
-  controllers: [HealthController, CompaniesController, ProjectsController, DocumentsController, ChatController, EnrichmentsController, ChatbotsController, WidgetController, EvalsController, FeedbackController],
+  controllers: [HealthController, CompaniesController, ProjectsController, DocumentsController, ChatController, EnrichmentsController, ChatbotsController, WidgetController, EvalsController, FeedbackController, UsageController],
   providers: [{ provide: APP_GUARD, useClass: SupabaseAuthGuard }],
 })
 export class AppModule {}

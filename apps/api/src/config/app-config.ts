@@ -88,4 +88,25 @@ export class AppConfig {
 
   /** Horas que dura una respuesta en caché. 0 desactiva la caché. */
   readonly answerCacheTtlHours = Number(optional('ANSWER_CACHE_TTL_HOURS', '168'));
+
+  /**
+   * Similitud mínima (coseno, 0–1) para reutilizar la respuesta de una pregunta
+   * parecida. 1 desactiva la caché por significado.
+   */
+  readonly semanticCacheMinSimilarity = Number(optional('SEMANTIC_CACHE_MIN_SIMILARITY', '0.92'));
+
+  /** Precalentar la caché automáticamente cuando cambian los documentos del proyecto. */
+  readonly cacheWarmAuto = optional('CACHE_WARM_AUTO', 'true') === 'true';
+
+  /** Precios en USD por millón de tokens, para estimar el gasto en el panel de uso. */
+  readonly prices = {
+    gemini: {
+      input: Number(optional('GEMINI_PRICE_INPUT_PER_M', '1.50')),
+      output: Number(optional('GEMINI_PRICE_OUTPUT_PER_M', '9.00')),
+    },
+    groq: {
+      input: Number(optional('GROQ_PRICE_INPUT_PER_M', '0.15')),
+      output: Number(optional('GROQ_PRICE_OUTPUT_PER_M', '0.60')),
+    },
+  };
 }

@@ -13,7 +13,7 @@ const { AppConfig } = require('../config/app-config');
 const { EnrichmentService } = require('./enrichment.service');
 
 test('describe: usa Google Search, toma el texto y deduplica las fuentes', async () => {
-  const service = new EnrichmentService({ admin: {} }, new AppConfig(), { getGeminiKey: async () => null });
+  const service = new EnrichmentService({ admin: {} }, new AppConfig(), { getGeminiKey: async () => null }, { record: async () => undefined });
   let request: Record<string, any> = {};
   service.ai = {
     models: {

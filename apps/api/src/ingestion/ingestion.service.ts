@@ -20,6 +20,8 @@ export interface IngestionResult {
   next?: IngestionJob;
   /** Proyecto cuyo catálogo cambió: hay que generar descripciones web nuevas. */
   enrichProjectId?: string;
+  /** Proyecto del documento terminado (para precalentar la caché). */
+  projectId?: string;
 }
 
 /** Errores que no se arreglan reintentando: el documento se marca como fallido de inmediato. */
@@ -140,7 +142,9 @@ export class IngestionService {
 
     await this.updateDocument(doc.id, { status: 'ready', chunk_count: chunks.length, error: null });
     this.logger.log(`Documento ${doc.id} listo: ${chunks.length} chunks en ${Date.now() - started} ms`);
-    return TABULAR_MIME_TYPES.has(doc.mime_type) ? { enrichProjectId: doc.project_id } : {};
+    return TABULAR_MIME_TYPES.has(doc.mime_type)
+      ? { enrichProjectId: doc.project_id, projectId: doc.project_id }
+      : { projectId: doc.project_id };
   }
 
   /**
@@ -148,7 +152,7 @@ export class IngestionService {
    * para que los lotes siguientes (y los reprocesos) no vuelvan a pagar el OCR.
    */
   private async cachedOcr(
-    doc: { company_id: string; storage_path: string },
+    doc: { company_id: string; project_id: string; storage_path: string },
     buffer: Buffer,
     mimeType: string,
   ): Promise<TextSection[]> {
@@ -165,7 +169,10 @@ export class IngestionService {
     let sections: TextSection[];
     try {
       const companyKey = await this.keys.getGeminiKey(doc.company_id);
-      sections = await this.ocr.transcribe(buffer, mimeType, companyKey);
+      sections = await this.ocr.transcribe(buffer, mimeType, companyKey, {
+        companyId: doc.company_id,
+        projectId: doc.project_id,
+      });
     } catch (err) {
       throw new OcrFailedError(`OCR con Gemini falló: ${(err as Error).message}`);
     }
