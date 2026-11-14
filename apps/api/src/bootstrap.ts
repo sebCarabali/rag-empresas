@@ -17,7 +17,7 @@ export async function createApp(): Promise<INestApplication> {
     callback(null, {
       origin: isPublicConfig ? '*' : config.webOrigins,
       methods: isPublicConfig ? ['GET', 'OPTIONS'] : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Authorization', 'Content-Type'],
+      allowedHeaders: ['Authorization', 'Content-Type', 'X-Widget-Token'],
       maxAge: 86400,
     });
   });

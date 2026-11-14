@@ -53,6 +53,12 @@ Cada proyecto tiene su asistente (`chatbots`), configurable en **Proyecto → As
   - El widget es público: actívalo solo en proyectos con información para clientes.
 - La clave pública se puede regenerar; la anterior deja de funcionar.
 
+### Claves secretas y widget protegido
+
+- **Claves de API** (`api_keys`): la API genera `sk_live_` + 32 bytes aleatorios, la devuelve una sola vez y guarda solo el SHA-256. El navegador no puede leer la columna del hash (permisos por columna); crear y revocar pasa por la API tras verificar owner/admin.
+- **Widget protegido** (`chatbots.widget_auth = 'token'`): el servidor de la empresa pide `POST /v1/widget-tokens` con `Authorization: Bearer sk_live_…` y entrega el token al widget (`data-token`, o `data-token-url` en su propio sitio para renovarlo). El token es `wt1.<datos>.<HMAC-SHA256>` con el chatbot y el vencimiento; va en el fragmento de la URL del iframe (no llega a los registros) y en la cabecera `X-Widget-Token`. Firma con `WIDGET_TOKEN_SECRET` o, si no existe, con una clave derivada (HKDF) de la service_role.
+- **API de servidor:** `POST /v1/chat` con `{ "question", "history"?, "stream"? }`.
+
 ### Página de prueba del widget
 
 `apps/widget-demo` es un sitio estático (proyecto de Vercel `rag-empresas-widget-demo`, sin build) que simula la web de una tienda ficticia en otro dominio. Se abre con `?bot=<clave pública>` y muestra un diagnóstico paso a paso: descarga de `widget.js`, configuración pública del chatbot, botón insertado y chat cargado en el iframe. Para que el chat se vea hay que activar el widget y agregar el dominio de la página en *Dominios autorizados*.

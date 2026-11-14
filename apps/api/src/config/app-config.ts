@@ -98,6 +98,12 @@ export class AppConfig {
   /** Precalentar la caché automáticamente cuando cambian los documentos del proyecto. */
   readonly cacheWarmAuto = optional('CACHE_WARM_AUTO', 'true') === 'true';
 
+  /**
+   * Secreto para firmar los tokens temporales del widget. Si no se define, se
+   * deriva de la clave service_role (cambiarla invalida los tokens emitidos).
+   */
+  readonly widgetTokenSecret = (process.env.WIDGET_TOKEN_SECRET ?? '').trim();
+
   /** Precios en USD por millón de tokens, para estimar el gasto en el panel de uso. */
   readonly prices = {
     gemini: {

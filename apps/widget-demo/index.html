@@ -99,6 +99,9 @@
         <label>URL de la app web (donde está widget.js)
           <input id="app" name="app" type="url" required />
         </label>
+        <label>Token del widget (solo en modo protegido; «Generar token de prueba» en Asistente y widget)
+          <input id="token" name="token" placeholder="wt1.…" autocomplete="off" spellcheck="false" />
+        </label>
         <div class="row">
           <label>URL de la API (para el diagnóstico)
             <input id="api" name="api" type="url" required />
@@ -140,10 +143,12 @@
       app: (params.get('app') || saved.app || DEFAULTS.app).replace(/\/$/, ''),
       api: (params.get('api') || saved.api || DEFAULTS.api).replace(/\/$/, ''),
       pos: params.get('pos') === 'left' ? 'left' : (params.get('pos') || saved.pos || DEFAULTS.pos),
+      // El token no se guarda en el navegador: vence y es por sesión.
+      token: (params.get('token') || '').trim(),
     };
 
     var $ = function (id) { return document.getElementById(id); };
-    $('bot').value = cfg.bot; $('app').value = cfg.app; $('api').value = cfg.api; $('pos').value = cfg.pos;
+    $('bot').value = cfg.bot; $('app').value = cfg.app; $('api').value = cfg.api; $('pos').value = cfg.pos; $('token').value = cfg.token;
     $('origin').textContent = location.origin;
     // El panel no tapa el botón del widget: va al lado contrario.
     if (cfg.pos === 'left') { $('panel').style.left = 'auto'; $('panel').style.right = '20px'; }
@@ -184,8 +189,11 @@
         api: $('api').value.trim(),
         pos: /data-position="left"/.test(raw) ? 'left' : $('pos').value,
       };
+      var tokenValue = $('token').value.trim();
       try { localStorage.setItem('widget-demo', JSON.stringify(next)); } catch (err) {}
-      location.search = new URLSearchParams(next).toString();
+      var query = new URLSearchParams(next);
+      if (tokenValue) query.set('token', tokenValue);
+      location.search = query.toString();
     });
 
     function log(text) {
@@ -228,7 +236,8 @@
       return;
     }
 
-    var snippet = '<script src="' + cfg.app + '/widget.js" data-bot="' + cfg.bot + '"' + (cfg.pos === 'left' ? ' data-position="left"' : '') + ' async><\/script>';
+    var snippet = '<script src="' + cfg.app + '/widget.js" data-bot="' + cfg.bot + '"' + (cfg.pos === 'left' ? ' data-position="left"' : '') +
+      (cfg.token ? ' data-token="' + cfg.token.slice(0, 12) + '…"' : '') + ' async><\/script>';
     $('snippet').textContent = snippet;
 
     // 2) Configuración pública (la misma petición que hace widget.js desde este dominio).
@@ -238,7 +247,11 @@
       if (!r.ok) throw new Error('La API respondió ' + r.status + '.');
       return r.json();
     }).then(function (c) {
-      set('config', 'ok', 'Activo: «' + c.name + '»' + (c.showSources ? ' · muestra fuentes' : '') + '.');
+      if (c.auth === 'token' && !cfg.token) {
+        set('config', 'bad', 'Activo: «' + c.name + '», en modo protegido. Falta el token: genera uno de prueba en «Asistente y widget» → «Generar token de prueba» y pégalo arriba.');
+        return;
+      }
+      set('config', 'ok', 'Activo: «' + c.name + '»' + (c.auth === 'token' ? ' · protegido con token' : ' · público') + (c.showSources ? ' · muestra fuentes' : '') + '.');
     }).catch(function (e) {
       var msg = e instanceof TypeError
         ? 'El navegador bloqueó la petición (CORS o red). La API debe permitir la configuración pública desde cualquier dominio.'
@@ -283,6 +296,7 @@
     s.src = cfg.app + '/widget.js';
     s.async = true;
     s.setAttribute('data-bot', cfg.bot);
+    if (cfg.token) s.setAttribute('data-token', cfg.token);
     if (cfg.pos === 'left') s.setAttribute('data-position', 'left');
     s.onload = function () {
       set('script', 'ok', 'Descargado.');

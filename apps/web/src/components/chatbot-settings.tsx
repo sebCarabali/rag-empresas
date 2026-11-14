@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type Chatbot } from '@/lib/api';
+import { ApiKeysPanel } from './api-keys-panel';
 import { Header } from './header';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
 
@@ -77,6 +78,7 @@ export function ChatbotSettings() {
         allowed_origins: lines(origins),
         daily_message_limit: bot.daily_message_limit,
         widget_show_sources: bot.widget_show_sources,
+        widget_auth: bot.widget_auth,
       });
       setBot(updated);
       setOrigins(updated.allowed_origins.join('\n'));
@@ -99,7 +101,9 @@ export function ChatbotSettings() {
 
   const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const snippet = bot?.public_key
-    ? `<script src="${appUrl}/widget.js" data-bot="${bot.public_key}" async></script>`
+    ? bot.widget_auth === 'token'
+      ? `<script src="${appUrl}/widget.js" data-bot="${bot.public_key}" data-token-url="/chat-token" async></script>`
+      : `<script src="${appUrl}/widget.js" data-bot="${bot.public_key}" async></script>`
     : '';
 
   return (
@@ -241,10 +245,44 @@ export function ChatbotSettings() {
                   </label>
                 </div>
 
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Acceso al widget</legend>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="widget_auth"
+                      className="mt-1"
+                      checked={bot.widget_auth === 'token'}
+                      onChange={() => set('widget_auth', 'token')}
+                    />
+                    <span>
+                      <strong>Protegido con token</strong> (recomendado). Tu servidor genera, con la clave secreta, un token
+                      temporal para cada visitante. La clave pública sola no sirve para usar el chat ni la API.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="widget_auth"
+                      className="mt-1"
+                      checked={bot.widget_auth === 'public'}
+                      onChange={() => set('widget_auth', 'public')}
+                    />
+                    <span>
+                      <strong>Público</strong>. Basta la clave pública en el HTML y los dominios autorizados. Más fácil (sirve
+                      en sitios sin servidor propio), pero cualquiera que copie la clave puede llamar al chat.
+                    </span>
+                  </label>
+                </fieldset>
+
                 {bot.public_key ? (
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Código para insertar</p>
-                    <p className="text-xs text-slate-500">Pégalo antes de &lt;/body&gt; en las páginas de tu sitio.</p>
+                    <p className="text-xs text-slate-500">
+                      Pégalo antes de &lt;/body&gt; en las páginas de tu sitio.
+                      {bot.widget_auth === 'token' &&
+                        ' En modo protegido, «/chat-token» es una ruta de TU servidor que devuelve {"token": "…"} (ver ejemplos abajo).'}
+                    </p>
                     <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{snippet}</pre>
                     <div className="flex flex-wrap gap-3 text-xs">
                       <button
@@ -279,6 +317,7 @@ export function ChatbotSettings() {
             </fieldset>
           </form>
         )}
+        {bot && canEdit && <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />}
       </main>
     </>
   );

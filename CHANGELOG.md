@@ -2,6 +2,15 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.14.0] - 2026-11-14
+
+### Agregado
+
+- Claves secretas de API por proyecto (`sk_live_…`): las genera la API, se muestran una sola vez y solo se guarda su hash. Se pueden nombrar y revocar, y registran su último uso.
+- Widget **protegido con token**: además de la clave pública, cada visitante necesita un token temporal (1 h por defecto, máx. 24 h) que emite el servidor de la empresa con su clave secreta (`POST /v1/widget-tokens`). `widget.js` acepta `data-token`, `data-token-url` (lo renueva solo al vencer) o `window.RagWidget.setToken()`.
+- API para el servidor de la empresa: `POST /v1/chat` (respuesta JSON o NDJSON en streaming), con el mismo límite diario del asistente; su uso aparece en el panel como «api».
+- En «Asistente y widget»: selector de acceso (protegido/público), administración de claves, ejemplos en cURL, C#, Java y Node, y token de prueba para la página de prueba (que ahora acepta `?token=`).
+
 ## [0.13.1] - 2026-11-14
 
 ### Corregido

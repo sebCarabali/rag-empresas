@@ -18,12 +18,13 @@ export interface ChatbotRow {
   allowed_origins: string[];
   daily_message_limit: number;
   widget_show_sources: boolean;
+  widget_auth: 'public' | 'token';
   updated_at?: string;
 }
 
 export const CHATBOT_COLUMNS =
   'id, company_id, project_id, name, welcome_message, instructions, suggested_questions, primary_color, ' +
-  'avatar_url, language, widget_enabled, public_key, allowed_origins, daily_message_limit, widget_show_sources, updated_at';
+  'avatar_url, language, widget_enabled, public_key, allowed_origins, daily_message_limit, widget_show_sources, widget_auth, updated_at';
 
 /** Valores por defecto mientras la empresa no personaliza su asistente. */
 export const DEFAULT_CHATBOT = {
@@ -38,6 +39,7 @@ export const DEFAULT_CHATBOT = {
   allowed_origins: [] as string[],
   daily_message_limit: 300,
   widget_show_sources: false,
+  widget_auth: 'token' as const,
 };
 
 /** Lo que ven los visitantes del widget (sin datos de administración). */
@@ -50,6 +52,8 @@ export function publicConfig(bot: ChatbotRow) {
     avatarUrl: bot.avatar_url,
     showSources: bot.widget_show_sources,
     allowedOrigins: bot.allowed_origins,
+    /** 'token': el sitio debe entregar un token temporal emitido por su servidor. */
+    auth: bot.widget_auth,
   };
 }
 

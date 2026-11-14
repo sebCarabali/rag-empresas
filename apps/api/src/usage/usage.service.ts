@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { SupabaseService } from '../supabase/supabase.service';
 
-export type UsageChannel = 'app' | 'widget' | 'eval' | 'warm' | 'ocr' | 'enrich';
+export type UsageChannel = 'app' | 'widget' | 'api' | 'eval' | 'warm' | 'ocr' | 'enrich';
 
 export interface TokenUsage {
   input: number;
