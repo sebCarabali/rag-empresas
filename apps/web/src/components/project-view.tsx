@@ -43,7 +43,10 @@ export function ProjectView() {
           <>
             <span>/</span>
             <span className="font-medium text-slate-900">{project.name}</span>
-            <Link href={`/projects/${project.id}/quality`} className="ml-auto text-xs font-medium text-slate-700 hover:text-slate-900">
+            <Link href={`/projects/${project.id}/chatbot?tab=uso`} className="ml-auto text-xs font-medium text-slate-700 hover:text-slate-900">
+              Uso y gastos
+            </Link>
+            <Link href={`/projects/${project.id}/quality`} className="text-xs font-medium text-slate-700 hover:text-slate-900">
               Calidad
             </Link>
             <Link href={`/projects/${project.id}/chatbot`} className="text-xs font-medium text-slate-700 hover:text-slate-900">
