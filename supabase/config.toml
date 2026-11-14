@@ -1,0 +1,6 @@
+# Configuración mínima para el CLI de Supabase.
+# Para desarrollo local completo ejecuta `supabase init --force` y conserva este project_id.
+project_id = "rag-empresas"
+
+[db]
+major_version = 17
