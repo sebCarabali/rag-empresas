@@ -1,18 +1,42 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+/* Sistema visual: superficies blancas sobre gris muy claro, tinta casi negra,
+   un solo acento índigo y barra lateral oscura. */
+@theme {
+  --color-canvas: #f4f5f7;
+  --color-ink: #0e1116;
+  --color-ink-2: #1f2430;
+  --color-muted: #5b6472;
+  --color-line: #e5e7eb;
+  --color-line-strong: #d9dce3;
+  --color-brand: #4338ca;
+  --color-brand-hover: #3730a3;
+  --color-brand-soft: #eef0ff;
+  --color-side: #0e1116;
+  --color-side-hover: #1c212b;
+  --color-side-line: #232936;
+  --color-side-text: #c9ced8;
+  --color-side-muted: #8a93a3;
+  --color-ok: #0f6b52;
+  --color-ok-soft: #e7f6f0;
+  --color-warn: #a15c00;
+  --color-warn-soft: #fff4e0;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-canvas);
+  color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-brand);
 }

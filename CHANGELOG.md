@@ -2,6 +2,15 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.16.0] - 2026-11-14
+
+### Cambiado
+
+- Nuevo diseño de la app: barra lateral oscura con las secciones del proyecto (Chat y documentos, Asistente y widget, Uso y gastos, Calidad) y el historial de conversaciones; en el móvil, menú desplegable.
+- Superficies blancas sobre gris claro, un solo acento índigo, tipografía Geist (incluida en la app, sin depender de Google Fonts) e iconos de trazo en lugar de emojis.
+- Ingreso e inicio con panel que explica el producto; proyectos en tarjetas con la creación integrada; chat con burbujas, consultas al catálogo en formato de código y fuentes desplegables; zona para subir documentos con estados en etiquetas.
+- Widget: cabecera con subtítulo, burbujas con borde, campo y botón de envío con icono y botón flotante cuadrado redondeado.
+
 ## [0.15.0] - 2026-11-14
 
 ### Agregado

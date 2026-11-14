@@ -67,13 +67,13 @@ export function GET() {
     frame.src = base + '/embed/' + key + (token ? '#t=' + encodeURIComponent(token) : '');
     frame.title = cfg.name || 'Asistente';
     frame.allow = 'clipboard-write';
-    frame.style.cssText = 'display:none;border:0;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.18);' +
+    frame.style.cssText = 'display:none;border:0;border-radius:20px;box-shadow:0 18px 50px rgba(14,17,22,.18);' +
       'width:min(380px,calc(100vw - 40px));height:min(600px,calc(100vh - 110px));margin-bottom:12px;background:#fff';
 
     var button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('aria-label', 'Abrir chat con ' + (cfg.name || 'el asistente'));
-    button.style.cssText = 'width:56px;height:56px;border-radius:50%;border:0;cursor:pointer;background:' + color +
+    button.style.cssText = 'width:56px;height:56px;border-radius:18px;border:0;cursor:pointer;background:' + color +
       ';color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;float:' + side;
     var chatIcon = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     var closeIcon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';

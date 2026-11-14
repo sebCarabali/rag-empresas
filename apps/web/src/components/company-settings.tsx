@@ -59,24 +59,24 @@ export function CompanySettingsView() {
   return (
     <>
       <Header>
-        <Link href="/dashboard" className="hover:text-slate-900">{companyName || 'Empresa'}</Link>
-        <span>/</span>
-        <span className="font-medium text-slate-900">Configuración</span>
+        <Link href="/dashboard" className="hover:text-white">{companyName || 'Empresa'}</Link>
+        <span aria-hidden="true">/</span>
+        <span className="font-medium text-white">Configuración de la empresa</span>
       </Header>
-      <main className="mx-auto w-full max-w-2xl flex-1 space-y-6 px-6 py-8">
+      <main className="mx-auto w-full max-w-2xl flex-1 space-y-6 px-6 py-10">
         {!settings && !error && <Spinner />}
         <ErrorText>{error}</ErrorText>
         {settings && (
           <Card className="space-y-4">
             <div>
               <h2 className="font-semibold">Clave de Gemini de la empresa</h2>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="mt-1 text-sm text-muted">
                 Con una clave propia, el chat y las descripciones web de tus proyectos usan tu cuenta de Google AI
                 Studio (tu cuota y tu facturación). Sin clave se usa la de la plataforma.
               </p>
             </div>
 
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+            <div className="rounded-lg bg-canvas px-3 py-2 text-sm">
               {gemini?.configured ? (
                 <>
                   <span className="font-medium text-emerald-700">Configurada</span> · termina en{' '}
@@ -84,7 +84,7 @@ export function CompanySettingsView() {
                   {gemini.updatedAt && <> · actualizada el {new Date(gemini.updatedAt).toLocaleString('es')}</>}
                 </>
               ) : (
-                <span className="text-slate-600">Sin clave propia: se usa la de la plataforma.</span>
+                <span className="text-muted">Sin clave propia: se usa la de la plataforma.</span>
               )}
             </div>
 
@@ -110,7 +110,7 @@ export function CompanySettingsView() {
                   )}
                   {message && <span className="text-sm text-emerald-700">{message}</span>}
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted">
                   La clave se comprueba con Gemini antes de guardarse y queda cifrada en Supabase Vault. Nunca se vuelve a
                   mostrar completa: solo sus últimos 4 caracteres. Créala en{' '}
                   <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="underline">
@@ -120,7 +120,7 @@ export function CompanySettingsView() {
                 </p>
               </form>
             ) : (
-              <p className="text-sm text-slate-500">Solo owner o admin pueden cambiar la clave.</p>
+              <p className="text-sm text-muted">Solo owner o admin pueden cambiar la clave.</p>
             )}
           </Card>
         )}

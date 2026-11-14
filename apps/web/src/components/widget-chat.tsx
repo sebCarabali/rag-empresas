@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { WidgetTokenError, widgetApi } from '@/lib/api';
 import { FeedbackButtons } from './feedback-buttons';
+import { CloseIcon, SendIcon } from './icons';
 
 type WidgetConfig = Awaited<ReturnType<typeof widgetApi.config>>;
 
@@ -139,47 +140,52 @@ export function WidgetChat() {
   }
 
   if (unavailable) {
-    return <div className="flex h-screen items-center justify-center p-6 text-sm text-slate-500">El asistente no está disponible.</div>;
+    return <div className="flex h-screen items-center justify-center p-6 text-sm text-muted">El asistente no está disponible.</div>;
   }
   if (!config) {
-    return <div className="flex h-screen items-center justify-center text-sm text-slate-400">Cargando…</div>;
+    return <div className="flex h-screen items-center justify-center text-sm text-muted">Cargando…</div>;
   }
 
   const color = config.primaryColor;
   return (
     <div className="flex h-screen flex-col bg-white text-sm">
-      <header className="flex items-center gap-3 px-4 py-3 text-white" style={{ background: color }}>
+      <header className="flex items-center gap-3 px-4 py-3.5 text-white" style={{ background: color }}>
         {config.avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={config.avatarUrl} alt="" className="h-8 w-8 rounded-full bg-white object-cover" />
+          <img src={config.avatarUrl} alt="" className="h-9 w-9 rounded-xl bg-white object-cover" />
         ) : (
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 font-semibold">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 font-semibold" aria-hidden="true">
             {config.name.charAt(0).toUpperCase()}
           </div>
         )}
-        <p className="flex-1 font-semibold">{config.name}</p>
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <p className="truncate text-[15px] font-semibold">{config.name}</p>
+          <p className="truncate text-xs opacity-85">Responde con los documentos de la empresa</p>
+        </div>
         <button
+          type="button"
           onClick={() => window.parent.postMessage('rag-widget-close', '*')}
-          className="rounded p-1 text-white/80 hover:text-white"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-white/90 hover:bg-white/15 hover:text-white"
           aria-label="Cerrar"
         >
-          ✕
+          <CloseIcon />
         </button>
       </header>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="flex-1 space-y-3.5 overflow-y-auto bg-[#fafafb] p-4">
         {turns.length === 0 && (
           <div className="space-y-3">
-            <div className="max-w-[85%] rounded-2xl bg-slate-100 px-3 py-2">
+            <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-[#eceef2] bg-white px-3.5 py-2.5 leading-relaxed">
               {config.welcomeMessage || `¡Hola! Soy ${config.name}. ¿En qué te puedo ayudar?`}
             </div>
             {config.suggestedQuestions.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {config.suggestedQuestions.map((q) => (
                   <button
                     key={q}
+                    type="button"
                     onClick={() => void send(q)}
-                    className="rounded-full border px-3 py-1 text-left text-xs hover:bg-slate-50"
+                    className="min-h-9 rounded-full border bg-white px-3 py-1.5 text-left text-[13px] hover:bg-[#f4f5f7]"
                     style={{ borderColor: color, color }}
                   >
                     {q}
@@ -191,16 +197,20 @@ export function WidgetChat() {
         )}
         {turns.map((t, i) => (
           <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 ${t.role === 'user' ? 'text-white' : 'bg-slate-100'}`}
-              style={t.role === 'user' ? { background: color } : undefined}
-            >
-              {t.content || (t.streaming && <span className="animate-pulse text-slate-500">Escribiendo…</span>)}
-              {t.role === 'assistant' && !t.streaming && config.showSources && t.sources && t.sources.length > 0 && (
-                <p className="mt-2 text-[11px] text-slate-500">
-                  Fuentes: {t.sources.map((s) => `[${s.index}] ${s.documentName}${s.page ? ` p.${s.page}` : ''}`).join(' · ')}
-                </p>
-              )}
+            <div className="flex max-w-[88%] flex-col gap-2">
+              <div
+                className={`whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 leading-relaxed ${
+                  t.role === 'user' ? 'rounded-br-md text-white' : 'rounded-bl-md border border-[#eceef2] bg-white'
+                }`}
+                style={t.role === 'user' ? { background: color } : undefined}
+              >
+                {t.content || (t.streaming && <span className="animate-pulse text-muted">Escribiendo…</span>)}
+                {t.role === 'assistant' && !t.streaming && config.showSources && t.sources && t.sources.length > 0 && (
+                  <p className="mt-2 text-[11px] text-muted">
+                    Fuentes: {t.sources.map((s) => `[${s.index}] ${s.documentName}${s.page ? ` p.${s.page}` : ''}`).join(' · ')}
+                  </p>
+                )}
+              </div>
               {t.role === 'assistant' && !t.streaming && t.messageId && t.sessionId && (
                 <FeedbackButtons
                   color={color}
@@ -212,28 +222,33 @@ export function WidgetChat() {
             </div>
           </div>
         ))}
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+        {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error}</p>}
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={(e) => void send(undefined, e)} className="flex gap-2 border-t p-3">
+      <form onSubmit={(e) => void send(undefined, e)} className="flex gap-2 border-t border-[#eceef2] p-3">
+        <label htmlFor="w-pregunta" className="sr-only">
+          Escribe tu pregunta
+        </label>
         <input
+          id="w-pregunta"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           maxLength={1000}
           placeholder="Escribe tu pregunta…"
-          className="flex-1 rounded-full border border-slate-300 px-4 py-2 outline-none focus:border-slate-500"
+          className="h-11 flex-1 rounded-xl border border-line-strong px-3.5 outline-none focus:border-[#9aa3b2]"
         />
         <button
           type="submit"
           disabled={sending || !input.trim()}
-          className="rounded-full px-4 py-2 font-medium text-white disabled:opacity-50"
+          aria-label="Enviar"
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-white disabled:opacity-40"
           style={{ background: color }}
         >
-          Enviar
+          <SendIcon />
         </button>
       </form>
-      <p className="pb-2 text-center text-[10px] text-slate-400">Respuestas generadas con IA; pueden contener errores.</p>
+      <p className="pb-2.5 text-center text-[11px] text-muted">Respuestas generadas con IA; pueden contener errores.</p>
     </div>
   );
 }

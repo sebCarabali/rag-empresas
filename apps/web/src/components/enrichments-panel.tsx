@@ -55,12 +55,12 @@ export function EnrichmentsPanel({ projectId }: { projectId: string }) {
   const failed = items.filter((i) => i.status === 'failed');
 
   return (
-    <details className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-      <summary className="cursor-pointer select-none font-medium">
+    <details className="rounded-2xl border border-line bg-white p-3 text-sm">
+      <summary className="cursor-pointer select-none text-[15px] font-semibold">
         Descripciones web · {ready}/{items.length}
-        {pending && <span className="ml-1 animate-pulse text-xs text-blue-700">generando…</span>}
+        {pending && <span className="ml-1 animate-pulse text-xs font-normal text-brand">generando…</span>}
       </summary>
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-muted">
         Información general de cada familia y tipo de tela, obtenida de internet. El chat la usa para explicar las
         telas; los datos técnicos siempre salen de tu catálogo.
       </p>
@@ -72,20 +72,20 @@ export function EnrichmentsPanel({ projectId }: { projectId: string }) {
       )}
       <ul className="mt-2 max-h-72 space-y-2 overflow-y-auto">
         {items.map((item) => (
-          <li key={item.id} className="rounded-md bg-slate-50 p-2">
+          <li key={item.id} className="rounded-xl bg-canvas p-3">
             <p className="text-xs font-medium">
               {item.field}: {item.value}
               {item.status !== 'ready' && (
-                <span className={`ml-1 ${item.status === 'failed' ? 'text-red-600' : 'text-slate-400'}`}>
+                <span className={`ml-1 ${item.status === 'failed' ? 'text-red-600' : 'text-muted'}`}>
                   ({item.status === 'failed' ? 'error' : 'pendiente'})
                 </span>
               )}
             </p>
-            {item.description && <p className="mt-1 text-xs text-slate-600">{item.description}</p>}
+            {item.description && <p className="mt-1 text-xs text-muted">{item.description}</p>}
             {item.sources.length > 0 && (
               <p className="mt-1 flex flex-wrap gap-x-2 text-[11px]">
                 {item.sources.map((s) => (
-                  <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">
+                  <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer" className="text-brand underline">
                     {s.title}
                   </a>
                 ))}
@@ -96,11 +96,11 @@ export function EnrichmentsPanel({ projectId }: { projectId: string }) {
       </ul>
       <div className="mt-2 flex gap-3 text-xs">
         {failed.length > 0 && (
-          <button disabled={busy} onClick={() => void refresh(false)} className="text-slate-700 hover:text-slate-900">
+          <button disabled={busy} onClick={() => void refresh(false)} className="text-ink-2 hover:text-ink">
             Reintentar fallidas
           </button>
         )}
-        <button disabled={busy} onClick={() => void refresh(true)} className="text-slate-500 hover:text-slate-900">
+        <button disabled={busy} onClick={() => void refresh(true)} className="text-muted hover:text-ink">
           Regenerar todas
         </button>
       </div>
