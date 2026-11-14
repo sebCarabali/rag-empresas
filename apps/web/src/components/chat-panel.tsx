@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { api, type Conversation, type Message, type Source, type ToolCall } from '@/lib/api';
+import { api, type Conversation, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
 import { Button, ErrorText } from './ui';
 
 interface ChatMessage {
@@ -10,6 +10,7 @@ interface ChatMessage {
   content: string;
   sources: Source[];
   toolCalls?: ToolCall[];
+  modelInfo?: ModelInfo | null;
   cached?: boolean;
   streaming?: boolean;
 }
@@ -39,7 +40,8 @@ export function ChatPanel({ projectId }: { projectId: string }) {
     let cancelled = false;
     api.messages(activeId).then(
       (list: Message[]) =>
-        !cancelled && setMessages(list.map((m) => ({ ...m, toolCalls: m.tool_calls ?? [] }))),
+        !cancelled &&
+        setMessages(list.map((m) => ({ ...m, toolCalls: m.tool_calls ?? [], modelInfo: m.model_info ?? null }))),
       (e) => !cancelled && setError(e.message),
     );
     return () => {
@@ -102,6 +104,8 @@ export function ChatPanel({ projectId }: { projectId: string }) {
           onSources: (sources) => update((msg) => ({ ...msg, sources })),
           onDelta: (text) => update((msg) => ({ ...msg, content: msg.content + text })),
           onTool: (call) => update((msg) => ({ ...msg, toolCalls: [...(msg.toolCalls ?? []), call] })),
+          onModel: (info) => update((msg) => ({ ...msg, modelInfo: info })),
+          onReset: () => update((msg) => ({ ...msg, content: '', toolCalls: [] })),
           onDone: ({ messageId, title, cached }) => {
             update((msg) => ({ ...msg, id: messageId, streaming: false, cached }));
             setConversations((list) =>
@@ -229,8 +233,18 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           {message.streaming && !message.content && <span className="animate-pulse">Buscando en los documentos…</span>}
           {message.streaming && message.content && <span className="animate-pulse">▍</span>}
         </p>
-        {!isUser && message.cached && (
-          <p className="mt-1 text-[11px] text-slate-400">Respuesta desde caché</p>
+        {!isUser && message.modelInfo?.fallback && (
+          <p className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+            Respondido con el modelo de respaldo <strong>Groq · {message.modelInfo.model}</strong>
+            {message.modelInfo.reason ? ` porque ${message.modelInfo.reason}.` : '.'}
+          </p>
+        )}
+        {!isUser && !message.streaming && (message.modelInfo || message.cached) && (
+          <p className="mt-1 text-[11px] text-slate-400">
+            {message.modelInfo && `${message.modelInfo.provider === 'groq' ? 'Groq' : 'Gemini'} · ${message.modelInfo.model}`}
+            {message.modelInfo && message.cached && ' · '}
+            {message.cached && 'Respuesta desde caché'}
+          </p>
         )}
         {!isUser && message.sources.length > 0 && !message.streaming && (
           <details className="mt-2 text-xs text-slate-600">

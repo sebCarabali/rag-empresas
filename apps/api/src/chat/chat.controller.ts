@@ -16,7 +16,8 @@ import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../common/supabase-error';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { GeminiService, type ChatTurn } from './gemini.service';
+import { type ChatTurn } from './gemini.service';
+import { LlmService, type ModelInfo } from './llm.service';
 import { AnswerCacheService } from './answer-cache.service';
 import { createCatalogExecutor, loadCatalogContext, type CatalogToolCall } from './catalog-tools';
 import { loadEnrichments } from './enrichment-context';
@@ -58,7 +59,7 @@ export class ChatController {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly embeddings: EmbeddingsService,
-    private readonly gemini: GeminiService,
+    private readonly llm: LlmService,
     private readonly cache: AnswerCacheService,
   ) {}
 
@@ -100,7 +101,7 @@ export class ChatController {
     return unwrap(
       await db
         .from('messages')
-        .select('id, role, content, sources, tool_calls, created_at')
+        .select('id, role, content, sources, tool_calls, model_info, created_at')
         .eq('conversation_id', id)
         .order('created_at', { ascending: true }),
     );
@@ -121,6 +122,8 @@ export class ChatController {
    * → Gemini en streaming, con herramientas de catálogo si el proyecto tiene CSV.
    * Responde NDJSON (una línea JSON por evento):
    *   {"type":"sources","sources":[...]}
+   *   {"type":"model","info":{...}}           (modelo que responde; cambia si hay respaldo)
+   *   {"type":"reset"}                         (descartar texto parcial antes del cambio de modelo)
    *   {"type":"tool","call":{...}}             (consultas exactas al catálogo)
    *   {"type":"delta","text":"..."}            (varias)
    *   {"type":"done","messageId":"...","title":"...","cached":false}
@@ -179,11 +182,24 @@ export class ChatController {
           : question
         : conversation.title;
 
-    const finish = async (answer: string, sources: Source[], toolCalls: CatalogToolCall[], cached: boolean) => {
+    const finish = async (
+      answer: string,
+      sources: Source[],
+      toolCalls: CatalogToolCall[],
+      cached: boolean,
+      modelInfo: ModelInfo | null,
+    ) => {
       const saved = unwrap(
         await db
           .from('messages')
-          .insert({ conversation_id: conversationId, role: 'assistant', content: answer, sources, tool_calls: toolCalls })
+          .insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: answer,
+            sources,
+            tool_calls: toolCalls,
+            model_info: modelInfo,
+          })
           .select('id')
           .single(),
       );
@@ -200,10 +216,11 @@ export class ChatController {
         cacheKey = this.cache.key(projectId, version, question);
         const hit = await this.cache.get(cacheKey);
         if (hit) {
+          if (hit.modelInfo) emit({ type: 'model', info: hit.modelInfo });
           emit({ type: 'sources', sources: hit.sources });
           for (const call of hit.toolCalls) emit({ type: 'tool', call });
           emit({ type: 'delta', text: hit.answer });
-          await finish(hit.answer, hit.sources, hit.toolCalls, true);
+          await finish(hit.answer, hit.sources, hit.toolCalls, true, hit.modelInfo ?? null);
           return;
         }
       }
@@ -239,6 +256,7 @@ export class ChatController {
         }),
       );
       emit({ type: 'sources', sources });
+      const baseSources = sources.length;
 
       // 3) Herramientas de catálogo (filtros exactos, conteos, rankings) si hay CSV procesados.
       const catalog = await loadCatalogContext(db, projectId);
@@ -247,7 +265,8 @@ export class ChatController {
       const systemInstruction = catalog ? `${SYSTEM_INSTRUCTION}\n${catalog.instructions}` : SYSTEM_INSTRUCTION;
 
       const turns: ChatTurn[] = [...previous, { role: 'user', content: buildUserTurn(question, chunks, extras) }];
-      for await (const event of this.gemini.run(systemInstruction, turns, {
+      let modelInfo: ModelInfo | null = null;
+      for await (const event of this.llm.run(systemInstruction, turns, {
         tools: catalog?.declarations,
         execute,
         signal: abort.signal,
@@ -255,16 +274,27 @@ export class ChatController {
         if (event.type === 'text') {
           answer += event.text;
           emit({ type: 'delta', text: event.text });
-        } else {
+        } else if (event.type === 'tool') {
           emit({ type: 'tool', call: toolCalls[toolCalls.length - 1] });
           // Las fuentes del catálogo se agregan a medida que el modelo consulta.
+          emit({ type: 'sources', sources });
+        } else if (event.type === 'model') {
+          modelInfo = event.info;
+          emit({ type: 'model', info: event.info });
+        } else if (event.type === 'reset') {
+          // El modelo principal falló a mitad de respuesta: se descarta lo parcial.
+          answer = '';
+          toolCalls.length = 0;
+          sources.splice(baseSources);
+          emit({ type: 'reset' });
           emit({ type: 'sources', sources });
         }
       }
 
-      await finish(answer, sources, toolCalls, false);
-      if (cacheKey && answer.trim()) {
-        await this.cache.put(cacheKey, projectId, question, { answer, sources, toolCalls });
+      await finish(answer, sources, toolCalls, false, modelInfo);
+      // Las respuestas del modelo de respaldo no se cachean: la próxima vez se intenta de nuevo con Gemini.
+      if (cacheKey && answer.trim() && !modelInfo?.fallback) {
+        await this.cache.put(cacheKey, projectId, question, { answer, sources, toolCalls, modelInfo });
       }
     } catch (err) {
       if (abort.signal.aborted) {

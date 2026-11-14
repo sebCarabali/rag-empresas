@@ -47,7 +47,8 @@ Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma
 1. **Caché:** toda pregunta que se entienda por sí sola se busca en `answer_cache`, también a mitad de una conversación. Se saltan las preguntas de seguimiento («¿y en plano?», «¿cuál de esas…?», «dame más»), porque su significado depende de lo anterior. La clave combina el proyecto, la pregunta normalizada (sin tildes ni signos), el modelo y una versión del contenido (cantidad de documentos y su última modificación), así que subir, reprocesar o borrar un documento la invalida sola. Dura `ANSWER_CACHE_TTL_HOURS` (168 h por defecto; 0 la desactiva).
 2. **Búsqueda híbrida:** pide 30 candidatos y se queda con 10, con un máximo de 2 por producto, para que una tela con muchas variantes no acapare el contexto.
 3. **Gemini:** responde en streaming y puede llamar a las herramientas del catálogo (hasta 4 rondas). Las consultas que hace se muestran en el chat y se guardan en `messages.tool_calls`.
-4. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
+4. **Respaldo en Groq:** si Gemini falla (cuota, servicio caído, clave inválida) o no empieza a responder en `GEMINI_FIRST_EVENT_TIMEOUT_MS` (25 s), la misma pregunta se responde con Groq (`GROQ_MODEL`, por defecto `openai/gpt-oss-120b`), con el mismo contexto y las mismas herramientas del catálogo. El chat muestra qué modelo respondió y por qué hubo cambio; queda guardado en `messages.model_info`. Las respuestas del respaldo no se cachean. Requiere `GROQ_KEY`.
+5. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
 
 ### Flujo de un documento
 
@@ -104,7 +105,7 @@ En local `INGEST_INLINE=true`: los documentos se procesan en el mismo proceso de
 | Proyecto | Root Directory | Framework | Variables |
 |---|---|---|---|
 | `rag-empresas-web` | `apps/web` | Next.js | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL` |
-| `rag-empresas-api` | `apps/api` | Other (lo fija `vercel.json`) | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `WEB_ORIGIN` |
+| `rag-empresas-api` | `apps/api` | Other (lo fija `vercel.json`) | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_KEY` (opcional), `WEB_ORIGIN` |
 
 - `WEB_ORIGIN` lleva la URL del frontend (o varias separadas por coma) para CORS.
 - Rama de producción: `main`. Los pushes a `develop` y a cada PR generan *previews*.

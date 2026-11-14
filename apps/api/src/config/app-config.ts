@@ -51,7 +51,14 @@ export class AppConfig {
   readonly geminiApiKey = required('GEMINI_API_KEY').trim();
   readonly geminiModel = optional('GEMINI_MODEL', 'gemini-3.5-flash');
 
-  readonly embeddingModel = optional('EMBEDDING_MODEL', 'Xenova/multilingual-e5-small');
+  /** Modelo de respaldo en Groq si Gemini falla. Sin clave (GROQ_KEY o GROQ_API_KEY) no hay respaldo. */
+  readonly groqApiKey = (process.env.GROQ_KEY || process.env.GROQ_API_KEY || '').trim();
+  readonly groqModel = optional('GROQ_MODEL', 'openai/gpt-oss-120b');
+  readonly llmFallback = optional('LLM_FALLBACK', 'true') === 'true';
+  /** Si Gemini no empieza a responder en este tiempo, se pasa a Groq. */
+  readonly geminiFirstEventTimeoutMs = Number(optional('GEMINI_FIRST_EVENT_TIMEOUT_MS', '25000'));
+
+  readonly embeddingModel =optional('EMBEDDING_MODEL', 'Xenova/multilingual-e5-small');
   /** Dimensión del vector: debe coincidir con document_chunks.embedding. */
   readonly embeddingDimensions = 384;
 
