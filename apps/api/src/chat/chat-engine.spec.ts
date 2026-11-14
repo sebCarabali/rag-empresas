@@ -51,6 +51,8 @@ function engineWith(
     cache as never,
     { getGeminiKey: async () => null } as never,
     { record: async (e: Record<string, unknown>) => void recorded.push(e) } as never,
+    { rerank: async (_q: string, items: unknown[]) => ({ items, reranked: false, ms: 0 }) } as never,
+    { ensureCurrent: async () => undefined } as never,
   );
   return { engine, puts, runs, recorded };
 }

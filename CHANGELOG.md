@@ -2,6 +2,18 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.18.0] - 2026-11-14
+
+### Agregado
+
+- Reordenador (cross-encoder multilingüe local, `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, Apache 2.0) entre la búsqueda y el modelo: de los 30 candidatos se eligen los 10 fragmentos más relevantes leyendo pregunta y fragmento juntos. Con tiempo máximo y vuelta al orden de la búsqueda si falla. Variables `RERANKER_*`.
+- Modelo de embeddings configurable (`EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_DTYPE`) y reindexado por proyecto: automático cuando el proyecto está indexado con otro modelo, o a mano con «Reindexar». Recalcula los embeddings del texto ya guardado, por lotes reanudables, con avance en la lista de documentos.
+- Función `set_embedding_dimensions(n)` (solo service_role) para pasar a e5-base (768) o e5-large (1024).
+
+### Cambiado
+
+- Las funciones de búsqueda y de caché por significado aceptan vectores de cualquier dimensión; los fragmentos sin embedding (en reindexado) siguen apareciendo por la búsqueda por texto.
+
 ## [0.17.0] - 2026-11-14
 
 ### Cambiado
