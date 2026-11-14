@@ -6,6 +6,10 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 300
+    },
+    "api/queues/ingest.js": {
+      "maxDuration": 300,
+      "experimentalTriggers": [{ "type": "queue/v2beta", "topic": "document-ingestion" }]
     }
   },
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
