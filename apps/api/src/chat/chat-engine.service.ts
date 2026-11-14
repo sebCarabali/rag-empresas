@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { CompanyKeysService } from '../companies/company-keys.service';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
-import { AnswerCacheService } from './answer-cache.service';
+import { AnswerCacheService, type CachedAnswer } from './answer-cache.service';
 import { createCatalogExecutor, loadCatalogContext, type CatalogToolCall } from './catalog-tools';
 import { loadEnrichments } from './enrichment-context';
 import type { ChatTurn } from './gemini.service';
@@ -62,22 +62,58 @@ export class ChatEngineService {
   ) {}
 
   async ask(input: AskInput, onPartial?: (answer: string) => void): Promise<AskResult> {
-    const { db, projectId, question, history, bot, emit, signal } = input;
+    const { db, projectId, question, history, bot, emit } = input;
 
     // 1) Caché: cualquier pregunta que se entienda sola (no las de seguimiento).
     let cacheKey: string | null = null;
+    let provisional: CachedAnswer | null = null;
     if (this.cache.enabled && !AnswerCacheService.isFollowUp(question, history.length > 0)) {
       const version = await this.cache.contentVersion(db, projectId);
       cacheKey = this.cache.key(projectId, version, question, botVariant(bot));
       const hit = await this.cache.get(cacheKey);
-      if (hit) {
-        if (hit.modelInfo) emit({ type: 'model', info: hit.modelInfo });
-        emit({ type: 'sources', sources: hit.sources });
-        for (const call of hit.toolCalls) emit({ type: 'tool', call });
-        emit({ type: 'delta', text: hit.answer });
-        return { answer: hit.answer, sources: hit.sources, toolCalls: hit.toolCalls, modelInfo: hit.modelInfo ?? null, cached: true };
-      }
+      if (hit && !hit.modelInfo?.fallback) return this.serveCached(hit, emit);
+      // Respuesta guardada del respaldo (Groq): es provisional. Se intenta con Gemini;
+      // si responde, la reemplaza en la caché; si no, se entrega la guardada.
+      provisional = hit;
     }
+
+    let result: Omit<AskResult, 'cached'>;
+    try {
+      result = await this.generate(input, { allowFallback: !provisional }, onPartial);
+    } catch (err) {
+      if (!provisional || input.signal.aborted) throw err;
+      emit({ type: 'reset' });
+      onPartial?.('');
+      return this.serveCached(provisional, emit);
+    }
+
+    // Gemini no dio texto: mejor la respuesta provisional que una vacía.
+    if (provisional && !result.answer.trim()) {
+      emit({ type: 'reset' });
+      return this.serveCached(provisional, emit);
+    }
+    // Se cachean las respuestas de ambos modelos; una de Gemini reemplaza a la provisional de Groq.
+    if (cacheKey && result.answer.trim()) {
+      await this.cache.put(cacheKey, projectId, question, result);
+    }
+    return { ...result, cached: false };
+  }
+
+  private serveCached(hit: CachedAnswer, emit: Emit): AskResult {
+    if (hit.modelInfo) emit({ type: 'model', info: hit.modelInfo });
+    emit({ type: 'sources', sources: hit.sources });
+    for (const call of hit.toolCalls) emit({ type: 'tool', call });
+    emit({ type: 'delta', text: hit.answer });
+    return { answer: hit.answer, sources: hit.sources, toolCalls: hit.toolCalls, modelInfo: hit.modelInfo ?? null, cached: true };
+  }
+
+  /** Genera una respuesta nueva: búsqueda, contexto, herramientas y modelo. */
+  private async generate(
+    input: AskInput,
+    options: { allowFallback: boolean },
+    onPartial?: (answer: string) => void,
+  ): Promise<Omit<AskResult, 'cached'>> {
+    const { db, projectId, question, history, bot, emit, signal } = input;
 
     // 2) Búsqueda híbrida, diversificada para que un producto no acapare el contexto.
     const queryEmbedding = await this.embeddings.embedQuery(question);
@@ -128,6 +164,7 @@ export class ChatEngineService {
       execute,
       signal,
       geminiApiKey,
+      allowFallback: options.allowFallback,
     })) {
       if (event.type === 'text') {
         answer += event.text;
@@ -150,12 +187,7 @@ export class ChatEngineService {
         emit({ type: 'sources', sources });
       }
     }
-
-    // Se cachean las respuestas de ambos modelos (Gemini y el respaldo en Groq).
-    if (cacheKey && answer.trim()) {
-      await this.cache.put(cacheKey, projectId, question, { answer, sources, toolCalls, modelInfo });
-    }
-    return { answer, sources, toolCalls, modelInfo, cached: false };
+    return { answer, sources, toolCalls, modelInfo };
   }
 }
 

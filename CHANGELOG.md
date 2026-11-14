@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.9.0] - 2026-11-14
+
+### Cambiado
+
+- Las respuestas de Groq en caché son provisionales: al repetirse la pregunta se intenta con Gemini. Si responde, su respuesta reemplaza a la de Groq; si falla, se entrega la de Groq guardada sin llamar de nuevo a Groq. Las respuestas de Gemini en caché se usan directamente. No hay invalidación por tiempo extra.
+
 ## [0.8.0] - 2026-11-14
 
 ### Cambiado
