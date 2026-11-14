@@ -136,7 +136,7 @@ export function ApiKeysPanel({ projectId, publicKey }: { projectId: string; publ
     <Card className="space-y-5">
       <div>
         <h2 className="font-semibold">Claves secretas de API</h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-muted">
           La API genera la clave y la muestra <strong>una sola vez</strong>; solo se guarda su huella (hash), así que nadie
           puede volver a verla. Úsala únicamente en el servidor de tu sitio: con ella se emiten los tokens temporales del widget
           protegido y se puede preguntar al asistente por API. Nunca la pongas en el HTML ni en JavaScript del navegador.
@@ -165,13 +165,13 @@ export function ApiKeysPanel({ projectId, publicKey }: { projectId: string; publ
         <Button type="button" onClick={() => void create()}>Generar clave</Button>
       </div>
 
-      <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 text-sm">
-        {keys?.length === 0 && <li className="px-3 py-2 text-slate-500">Aún no hay claves.</li>}
+      <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+        {keys?.length === 0 && <li className="px-3 py-2 text-muted">Aún no hay claves.</li>}
         {keys?.map((k) => (
           <li key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
             <span className="font-medium">{k.name}</span>
-            <code className="text-xs text-slate-500">{k.prefix}…{k.last4}</code>
-            <span className="text-xs text-slate-500">creada {fmt(k.created_at)} · último uso {fmt(k.last_used_at)}</span>
+            <code className="text-xs text-muted">{k.prefix}…{k.last4}</code>
+            <span className="text-xs text-muted">creada {fmt(k.created_at)} · último uso {fmt(k.last_used_at)}</span>
             {k.revoked_at ? (
               <span className="ml-auto text-xs text-red-600">revocada {fmt(k.revoked_at)}</span>
             ) : (
@@ -191,22 +191,22 @@ export function ApiKeysPanel({ projectId, publicKey }: { projectId: string; publ
               key={id}
               type="button"
               onClick={() => setLang(id)}
-              className={`rounded-full border px-3 py-1 text-xs ${lang === id ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 hover:bg-slate-50'}`}
+              className={`rounded-full border px-3 py-1 text-xs ${lang === id ? 'border-brand bg-brand text-white' : 'border-line-strong hover:bg-canvas'}`}
             >
               {label}
             </button>
           ))}
         </div>
-        <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{code}</pre>
-        <button type="button" onClick={() => copy(code, 'code')} className="text-xs font-medium text-slate-700 hover:text-slate-900">
+        <pre className="overflow-x-auto rounded-xl bg-side p-4 text-xs text-slate-100">{code}</pre>
+        <button type="button" onClick={() => copy(code, 'code')} className="text-xs font-medium text-ink-2 hover:text-ink">
           {copied === 'code' ? 'Copiado ✓' : 'Copiar ejemplo'}
         </button>
       </div>
 
       {publicKey && (
-        <div className="space-y-2 border-t border-slate-100 pt-4">
+        <div className="space-y-2 border-t border-line pt-4">
           <p className="text-sm font-medium">Probar el modo protegido sin servidor</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted">
             Genera un token de prueba válido por 1 hora y ábrelo en la página de prueba (agrega su dominio en «Dominios
             autorizados»).
           </p>
@@ -217,7 +217,7 @@ export function ApiKeysPanel({ projectId, publicKey }: { projectId: string; publ
             <p className="text-xs">
               Vence {fmt(testToken.expiresAt)} ·{' '}
               <a
-                className="font-medium text-blue-700 underline"
+                className="font-medium text-brand underline"
                 target="_blank"
                 rel="noopener noreferrer"
                 href={`${DEMO_URL}/?bot=${publicKey}&token=${encodeURIComponent(testToken.token)}`}

@@ -1,11 +1,10 @@
 'use client';
 
-import Link from 'next/link';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type Chatbot } from '@/lib/api';
 import { ApiKeysPanel } from './api-keys-panel';
-import { Header } from './header';
+import { ProjectShell } from './project-shell';
 import { UsageTab } from './usage-tab';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
 
@@ -21,7 +20,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <label className="block space-y-1">
       <span className="text-sm font-medium">{label}</span>
       {children}
-      {hint && <span className="block text-xs text-slate-500">{hint}</span>}
+      {hint && <span className="block text-xs text-muted">{hint}</span>}
     </label>
   );
 }
@@ -31,9 +30,7 @@ const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boo
 /** Personalización del asistente del proyecto y configuración del widget para el sitio web. */
 export function ChatbotSettings() {
   const { projectId } = useParams<{ projectId: string }>();
-  const router = useRouter();
   const tab = useSearchParams().get('tab') === 'uso' ? 'uso' : 'config';
-  const [projectName, setProjectName] = useState('');
   const [bot, setBot] = useState<Chatbot | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [messagesToday, setMessagesToday] = useState(0);
@@ -45,7 +42,6 @@ export function ChatbotSettings() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.project(projectId).then((p) => setProjectName(p.name), () => undefined);
     api.chatbot(projectId).then(
       (r) => {
         setBot(r.chatbot);
@@ -109,37 +105,18 @@ export function ChatbotSettings() {
       : `<script src="${appUrl}/widget.js" data-bot="${bot.public_key}" async></script>`
     : '';
 
+  const base = `/projects/${projectId}/chatbot`;
   return (
-    <>
-      <Header>
-        <Link href="/dashboard" className="hover:text-slate-900">Proyectos</Link>
-        <span>/</span>
-        <Link href={`/projects/${projectId}`} className="hover:text-slate-900">{projectName || 'Proyecto'}</Link>
-        <span>/</span>
-        <span className="font-medium text-slate-900">Asistente y widget</span>
-      </Header>
-
-      <main className={`mx-auto w-full flex-1 space-y-6 px-6 py-8 ${tab === 'uso' ? 'max-w-5xl' : 'max-w-3xl'}`}>
-        <nav className="flex gap-2 border-b border-slate-200" aria-label="Secciones">
-          {(
-            [
-              ['config', 'Configuración'],
-              ['uso', 'Uso y gastos'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => router.replace(id === 'uso' ? `/projects/${projectId}/chatbot?tab=uso` : `/projects/${projectId}/chatbot`)}
-              aria-current={tab === id ? 'page' : undefined}
-              className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-                tab === id ? 'border-slate-900 font-medium text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+    <ProjectShell
+      projectId={projectId}
+      title={tab === 'uso' ? 'Uso y gastos' : 'Asistente y widget'}
+      tabs={[
+        { id: 'config', label: 'Configuración', href: base },
+        { id: 'uso', label: 'Uso y gastos', href: `${base}?tab=uso` },
+      ]}
+      activeTab={tab}
+    >
+      <div className={`w-full space-y-6 ${tab === 'uso' ? 'max-w-6xl' : 'max-w-3xl'}`}>
         <ErrorText>{error}</ErrorText>
         {!bot && !error && <Spinner />}
         {bot && tab === 'uso' && (
@@ -149,7 +126,7 @@ export function ChatbotSettings() {
               <UsageTab projectId={projectId} />
             </>
           ) : (
-            <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
+            <p className="rounded-lg bg-canvas px-3 py-2 text-sm text-muted">
               El uso y los gastos solo los ven owner o admin.
             </p>
           )
@@ -157,14 +134,14 @@ export function ChatbotSettings() {
         {bot && tab === 'config' && (
           <form onSubmit={save} className="space-y-6">
             {!canEdit && (
-              <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              <p className="rounded-lg bg-canvas px-3 py-2 text-sm text-muted">
                 Solo owner o admin pueden cambiar esta configuración.
               </p>
             )}
             <fieldset disabled={!canEdit} className="space-y-6">
               <Card className="space-y-4">
                 <h2 className="font-semibold">Personalización</h2>
-                <p className="text-sm text-slate-500">Se aplica al chat de la app y al widget de tu sitio web.</p>
+                <p className="text-sm text-muted">Se aplica al chat de la app y al widget de tu sitio web.</p>
                 <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
                   <Field label="Nombre del asistente">
                     <Input value={bot.name} maxLength={60} required onChange={(e) => set('name', e.target.value)} />
@@ -174,7 +151,7 @@ export function ChatbotSettings() {
                       type="color"
                       value={bot.primary_color}
                       onChange={(e) => set('primary_color', e.target.value)}
-                      className="h-9 w-16 cursor-pointer rounded border border-slate-300"
+                      className="h-9 w-16 cursor-pointer rounded border border-line-strong"
                     />
                   </Field>
                 </div>
@@ -203,7 +180,7 @@ export function ChatbotSettings() {
                     maxLength={2000}
                     value={bot.instructions ?? ''}
                     onChange={(e) => set('instructions', e.target.value || null)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                    className="w-full rounded-lg border border-line-strong px-3 py-2 text-sm outline-none focus:border-brand"
                   />
                 </Field>
                 <Field label="Preguntas sugeridas (una por línea, máximo 6)">
@@ -215,14 +192,14 @@ export function ChatbotSettings() {
                       setQuestions(e.target.value);
                     }}
                     placeholder={'¿Qué telas de algodón tienen?\n¿Cuál es la tela más liviana?'}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                    className="w-full rounded-lg border border-line-strong px-3 py-2 text-sm outline-none focus:border-brand"
                   />
                 </Field>
                 <Field label="Idioma de las respuestas">
                   <select
                     value={bot.language}
                     onChange={(e) => set('language', e.target.value as Chatbot['language'])}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-line-strong bg-white px-3 py-2 text-sm"
                   >
                     {LANGUAGES.map((l) => (
                       <option key={l.value} value={l.value}>{l.label}</option>
@@ -257,7 +234,7 @@ export function ChatbotSettings() {
                       setOrigins(e.target.value);
                     }}
                     placeholder="https://www.tuempresa.com"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs outline-none focus:border-slate-900"
+                    className="w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-xs outline-none focus:border-brand"
                   />
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -313,12 +290,12 @@ export function ChatbotSettings() {
                 {bot.public_key ? (
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Código para insertar</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-muted">
                       Pégalo antes de &lt;/body&gt; en las páginas de tu sitio.
                       {bot.widget_auth === 'token' &&
                         ' En modo protegido, «/chat-token» es una ruta de TU servidor que devuelve {"token": "…"} (ver ejemplos abajo).'}
                     </p>
-                    <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{snippet}</pre>
+                    <pre className="overflow-x-auto rounded-xl bg-side p-4 text-xs text-slate-100">{snippet}</pre>
                     <div className="flex flex-wrap gap-3 text-xs">
                       <button
                         type="button"
@@ -326,12 +303,12 @@ export function ChatbotSettings() {
                           void navigator.clipboard.writeText(snippet);
                           setCopied(true);
                         }}
-                        className="font-medium text-slate-700 hover:text-slate-900"
+                        className="font-medium text-ink-2 hover:text-ink"
                       >
                         {copied ? 'Copiado ✓' : 'Copiar código'}
                       </button>
                       {bot.widget_enabled && (
-                        <a href={`/embed/${bot.public_key}`} target="_blank" rel="noopener noreferrer" className="text-slate-700 hover:text-slate-900">
+                        <a href={`/embed/${bot.public_key}`} target="_blank" rel="noopener noreferrer" className="text-ink-2 hover:text-ink">
                           Probar el widget
                         </a>
                       )}
@@ -341,39 +318,39 @@ export function ChatbotSettings() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500">Guarda la configuración para obtener el código del widget.</p>
+                  <p className="text-xs text-muted">Guarda la configuración para obtener el código del widget.</p>
                 )}
               </Card>
 
               <div className="flex items-center gap-3">
                 <Button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
-                {saved && <span className="text-sm text-emerald-700">Guardado ✓</span>}
+                {saved && <span className="text-sm text-ok">Guardado ✓</span>}
               </div>
             </fieldset>
           </form>
         )}
         {bot && canEdit && tab === 'config' && <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />}
-      </main>
-    </>
+      </div>
+    </ProjectShell>
   );
 }
 
 /** Consumo del día frente al tope diario del widget (lo comparten widget y API de servidor). */
 function WidgetLimit({ enabled, today, limit }: { enabled: boolean; today: number; limit: number }) {
   const ratio = limit ? Math.min(1, today / limit) : 0;
-  const tone = ratio >= 1 ? 'bg-red-600' : ratio >= 0.8 ? 'bg-amber-500' : 'bg-blue-600';
+  const tone = ratio >= 1 ? 'bg-red-600' : ratio >= 0.8 ? 'bg-amber-500' : 'bg-brand';
   return (
     <Card className="space-y-2 !p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm font-medium">Mensajes del widget hoy</p>
-        <p className="text-sm tabular-nums text-slate-700">
+        <p className="text-sm tabular-nums text-ink-2">
           <strong>{today.toLocaleString('es')}</strong> de {limit.toLocaleString('es')} ({Math.round(ratio * 100)} %)
         </p>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={today}>
+      <div className="h-2 overflow-hidden rounded-full bg-canvas" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={today}>
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(ratio * 100, today ? 2 : 0)}%` }} />
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         {enabled ? 'Widget activo.' : 'Widget desactivado.'} Al llegar al tope, el widget y la API de servidor dejan de responder
         hasta el día siguiente (hora UTC). Cámbialo en Configuración → «Límite de mensajes por día».
       </p>

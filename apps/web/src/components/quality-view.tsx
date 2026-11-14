@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
@@ -12,7 +11,7 @@ import {
   type ModelInfo,
   type WidgetMessage,
 } from '@/lib/api';
-import { Header } from './header';
+import { ProjectShell } from './project-shell';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
 
 type Tab = 'feedback' | 'widget' | 'evals';
@@ -39,34 +38,20 @@ const splitList = (text: string) =>
 /** Calidad de respuestas: valoraciones, conversaciones del widget y pruebas automáticas. */
 export function QualityView() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [projectName, setProjectName] = useState('');
   const [tab, setTab] = useState<Tab>('feedback');
 
-  useEffect(() => {
-    api.project(projectId).then((p) => setProjectName(p.name), () => undefined);
-  }, [projectId]);
-
   return (
-    <>
-      <Header>
-        <Link href="/dashboard" className="hover:text-slate-900">Proyectos</Link>
-        <span>/</span>
-        <Link href={`/projects/${projectId}`} className="hover:text-slate-900">{projectName || 'Proyecto'}</Link>
-        <span>/</span>
-        <span className="font-medium text-slate-900">Calidad</span>
-      </Header>
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8">
-        <p className="text-xs text-slate-500">
-          El uso, la caché y los gastos están en{' '}
-          <Link href={`/projects/${projectId}/chatbot?tab=uso`} className="underline">Asistente y widget → Uso y gastos</Link>.
-        </p>
-        <nav className="flex flex-wrap gap-2 border-b border-slate-200">
+    <ProjectShell projectId={projectId} title="Calidad">
+      <div className="w-full max-w-5xl space-y-6">
+        <nav className="flex flex-wrap gap-1 border-b border-line" aria-label="Secciones de calidad">
           {TABS.map((t) => (
             <button
               key={t.id}
+              type="button"
               onClick={() => setTab(t.id)}
-              className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-                tab === t.id ? 'border-slate-900 font-medium text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'
+              aria-current={tab === t.id ? 'page' : undefined}
+              className={`-mb-px border-b-2 px-3 py-2.5 text-sm ${
+                tab === t.id ? 'border-brand font-medium text-ink' : 'border-transparent text-muted hover:text-ink'
               }`}
             >
               {t.label}
@@ -76,8 +61,8 @@ export function QualityView() {
         {tab === 'feedback' && <FeedbackTab projectId={projectId} />}
         {tab === 'widget' && <WidgetTab projectId={projectId} />}
         {tab === 'evals' && <EvalsTab projectId={projectId} />}
-      </main>
-    </>
+      </div>
+    </ProjectShell>
   );
 }
 
@@ -93,7 +78,7 @@ function RatingFilterBar({ value, onChange }: { value: RatingFilter; onChange: (
         <button
           key={v}
           onClick={() => onChange(v)}
-          className={`rounded-full border px-3 py-1 text-xs ${value === v ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 hover:bg-slate-50'}`}
+          className={`rounded-full border px-3 py-1 text-xs ${value === v ? 'border-brand bg-brand text-white' : 'border-line-strong hover:bg-canvas'}`}
         >
           {label}
         </button>
@@ -105,10 +90,10 @@ function RatingFilterBar({ value, onChange }: { value: RatingFilter; onChange: (
 function QA({ question, answer, meta }: { question: string | null; answer: string | null; meta?: string | null }) {
   return (
     <div className="space-y-2 text-sm">
-      <p className="font-medium text-slate-900">{question ?? '(pregunta no disponible)'}</p>
+      <p className="font-medium text-ink">{question ?? '(pregunta no disponible)'}</p>
       <details>
-        <summary className="cursor-pointer select-none text-xs text-slate-500">Ver respuesta{meta ? ` · ${meta}` : ''}</summary>
-        <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-slate-700">{answer}</p>
+        <summary className="cursor-pointer select-none text-xs text-muted">Ver respuesta{meta ? ` · ${meta}` : ''}</summary>
+        <p className="mt-2 whitespace-pre-wrap rounded-lg bg-canvas p-3 text-ink-2">{answer}</p>
       </details>
     </div>
   );
@@ -132,19 +117,19 @@ function FeedbackTab({ projectId }: { projectId: string }) {
 
   return (
     <section className="space-y-4">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-muted">
         Respuestas del chat interno valoradas con 👍/👎. Los administradores ven las de todo el equipo; el resto, solo las suyas.
         Las negativas suelen indicar documentos faltantes o preguntas que conviene agregar a las pruebas automáticas.
       </p>
       <RatingFilterBar value={filter} onChange={(v) => { setItems(null); setFilter(v); }} />
       <ErrorText>{error}</ErrorText>
       {!items && !error && <Spinner />}
-      {items?.length === 0 && <p className="text-sm text-slate-500">No hay valoraciones con este filtro.</p>}
+      {items?.length === 0 && <p className="text-sm text-muted">No hay valoraciones con este filtro.</p>}
       <ul className="space-y-3">
         {items?.map((f) => (
           <li key={f.message_id}>
             <Card className="space-y-2 !p-4">
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted">
                 {f.rating === 1 ? '👍' : '👎'} · {fmtDate(f.updated_at)}
               </p>
               <QA question={f.question} answer={f.answer} meta={modelLabel(f.model_info)} />
@@ -192,19 +177,19 @@ function WidgetTab({ projectId }: { projectId: string }) {
 
   return (
     <section className="space-y-4">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-muted">
         Lo que preguntan los visitantes de tu sitio web en el widget, con su valoración si la dejaron. Los visitantes son anónimos;
         cada sesión del navegador tiene un identificador aleatorio.
       </p>
       <RatingFilterBar value={filter} onChange={(v) => { setItems(null); setFilter(v); }} />
       <ErrorText>{error}</ErrorText>
       {!items && !error && <Spinner />}
-      {items?.length === 0 && <p className="text-sm text-slate-500">Todavía no hay preguntas del widget con este filtro.</p>}
+      {items?.length === 0 && <p className="text-sm text-muted">Todavía no hay preguntas del widget con este filtro.</p>}
       <ul className="space-y-3">
         {items?.map((m) => (
           <li key={m.id}>
             <Card className="space-y-2 !p-4">
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted">
                 {fmtDate(m.created_at)} · sesión {m.session_id.slice(0, 8)}
                 {m.rating === 1 && ' · 👍'}
                 {m.rating === -1 && ' · 👎'}
@@ -325,7 +310,7 @@ function EvalsTab({ projectId }: { projectId: string }) {
 
   return (
     <section className="space-y-6">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-muted">
         Define preguntas y lo que la respuesta debe contener (por ejemplo, una cifra o un nombre de producto). Al ejecutar, cada
         pregunta pasa por el asistente sin usar la caché y se marca como correcta si contiene todos los textos esperados y ninguno
         de los prohibidos. No distingue mayúsculas, tildes ni separadores de miles. Úsalas después de cambiar documentos o
@@ -343,24 +328,24 @@ function EvalsTab({ projectId }: { projectId: string }) {
             placeholder="¿Cuántas telas pesan menos de 120 g/m²?"
           />
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1 text-xs text-slate-600">
+            <label className="space-y-1 text-xs text-muted">
               <span>Debe contener (uno por línea)</span>
               <textarea
                 value={form.include}
                 onChange={(e) => setForm({ ...form, include: e.target.value })}
                 rows={3}
                 placeholder="722"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                className="w-full rounded-lg border border-line-strong px-3 py-2 text-sm outline-none focus:border-brand"
               />
             </label>
-            <label className="space-y-1 text-xs text-slate-600">
+            <label className="space-y-1 text-xs text-muted">
               <span>No debe contener (opcional, uno por línea)</span>
               <textarea
                 value={form.exclude}
                 onChange={(e) => setForm({ ...form, exclude: e.target.value })}
                 rows={3}
                 placeholder="no encontré"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                className="w-full rounded-lg border border-line-strong px-3 py-2 text-sm outline-none focus:border-brand"
               />
             </label>
           </div>
@@ -385,18 +370,18 @@ function EvalsTab({ projectId }: { projectId: string }) {
           </Button>
         </div>
         {!cases && <Spinner />}
-        {cases?.length === 0 && <p className="text-sm text-slate-500">Aún no hay preguntas de prueba.</p>}
-        <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+        {cases?.length === 0 && <p className="text-sm text-muted">Aún no hay preguntas de prueba.</p>}
+        <ul className="divide-y divide-line rounded-xl border border-line bg-white">
           {cases?.map((c) => (
             <li key={c.id} className="flex items-start gap-3 px-4 py-3 text-sm">
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{c.question}</p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted">
                   {c.must_include.length > 0 && <>Debe contener: {c.must_include.join(' · ')}</>}
                   {c.must_not_include.length > 0 && <> · No debe contener: {c.must_not_include.join(' · ')}</>}
                 </p>
               </div>
-              <button onClick={() => edit(c)} className="text-xs text-slate-600 hover:text-slate-900">Editar</button>
+              <button onClick={() => edit(c)} className="text-xs text-muted hover:text-ink">Editar</button>
               <button onClick={() => void removeCase(c.id)} className="text-xs text-red-600 hover:text-red-800">Eliminar</button>
             </li>
           ))}
@@ -410,7 +395,7 @@ function EvalsTab({ projectId }: { projectId: string }) {
             <select
               value={selected?.id ?? ''}
               onChange={(e) => void loadRun(e.target.value)}
-              className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+              className="rounded-lg border border-line-strong px-2 py-1 text-sm"
             >
               {runs.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -454,16 +439,16 @@ function RunDetail({ run }: { run: EvalRun & { results: EvalResult[] } }) {
           <li key={r.id} className={`rounded-lg border px-3 py-2 ${r.passed ? 'border-emerald-200 bg-emerald-50/40' : 'border-red-200 bg-red-50/40'}`}>
             <p className="text-sm">
               {r.passed ? '✅' : '❌'} <span className="font-medium">{r.question}</span>
-              {r.duration_ms !== null && <span className="text-xs text-slate-500"> · {(r.duration_ms / 1000).toFixed(1)} s</span>}
+              {r.duration_ms !== null && <span className="text-xs text-muted"> · {(r.duration_ms / 1000).toFixed(1)} s</span>}
             </p>
             {r.missing.length > 0 && <p className="text-xs text-red-700">Faltó: {r.missing.join(' · ')}</p>}
             {r.forbidden.length > 0 && <p className="text-xs text-red-700">Contiene lo prohibido: {r.forbidden.join(' · ')}</p>}
             {r.error && <p className="text-xs text-red-700">Error: {r.error}</p>}
             <details>
-              <summary className="cursor-pointer select-none text-xs text-slate-500">
+              <summary className="cursor-pointer select-none text-xs text-muted">
                 Ver respuesta{modelLabel(r.model_info) ? ` · ${modelLabel(r.model_info)}` : ''}
               </summary>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{r.answer || '(sin respuesta)'}</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-ink-2">{r.answer || '(sin respuesta)'}</p>
             </details>
           </li>
         ))}

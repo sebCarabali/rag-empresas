@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Header } from '@/components/header';
+import { FileIcon, PlusIcon, SettingsIcon } from '@/components/icons';
 import { Button, Card, ErrorText, Input, Spinner } from '@/components/ui';
 import { api, type Company, type Project } from '@/lib/api';
 
@@ -50,7 +51,8 @@ export default function DashboardPage() {
       <Header email={email}>
         {companies && companies.length > 1 && (
           <select
-            className="rounded-md border border-slate-300 px-2 py-1"
+            aria-label="Empresa"
+            className="h-9 rounded-lg border border-side-line bg-side-hover px-2.5 text-sm text-white"
             value={companyId ?? ''}
             onChange={(e) => selectCompany(e.target.value)}
           >
@@ -61,10 +63,10 @@ export default function DashboardPage() {
             ))}
           </select>
         )}
-        {companies?.length === 1 && <span>{companies[0].name}</span>}
+        {companies?.length === 1 && <span className="rounded-lg bg-side-hover px-2.5 py-1.5 text-sm text-white">{companies[0].name}</span>}
       </Header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
         <ErrorText>{error}</ErrorText>
         {!companies && !error && <Spinner />}
         {companies?.length === 0 && (
@@ -103,8 +105,8 @@ function CreateCompany({ onCreated }: { onCreated: (c: Company) => void }) {
     <Card className="mx-auto max-w-md">
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <h1 className="text-xl font-semibold">Registra tu empresa</h1>
-          <p className="mt-1 text-sm text-slate-600">Serás el administrador. Luego podrás crear proyectos.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Registra tu empresa</h1>
+          <p className="mt-1 text-sm text-muted">Serás el administrador. Luego podrás crear proyectos.</p>
         </div>
         <Input required minLength={2} placeholder="Nombre de la empresa" value={name} onChange={(e) => setName(e.target.value)} />
         <ErrorText>{error}</ErrorText>
@@ -145,51 +147,72 @@ function Projects({ company }: { company: Company }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{company.name}</h1>
-        <p className="text-sm text-slate-500">
-          Proyectos de la empresa · tu rol: {company.role}
-          {canManage && (
-            <>
-              {' · '}
-              <Link href={`/companies/${company.id}/settings`} className="font-medium text-slate-700 underline hover:text-slate-900">
-                Configuración de la empresa
-              </Link>
-            </>
-          )}
-        </p>
+    <div className="flex flex-col gap-7">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="mr-auto flex flex-col gap-1.5">
+          <h1 className="text-3xl font-semibold tracking-tight">Proyectos</h1>
+          <p className="text-[15px] text-muted">
+            {company.name} · cada proyecto tiene sus documentos, su asistente y su widget · tu rol: {company.role}
+          </p>
+        </div>
+        {canManage && (
+          <Link
+            href={`/companies/${company.id}/settings`}
+            className="inline-flex h-10 items-center gap-2 rounded-[10px] border border-line-strong bg-white px-4 text-sm font-medium hover:bg-canvas"
+          >
+            <SettingsIcon size={16} />
+            Configuración de la empresa
+          </Link>
+        )}
       </div>
-
-      {canManage && (
-        <Card>
-          <form onSubmit={create} className="flex flex-col gap-3 sm:flex-row">
-            <Input required minLength={2} placeholder="Nombre del proyecto" value={name} onChange={(e) => setName(e.target.value)} />
-            <Input placeholder="Descripción (opcional)" value={description} onChange={(e) => setDescription(e.target.value)} />
-            <Button type="submit" disabled={saving} className="shrink-0">
-              {saving ? 'Creando…' : 'Nuevo proyecto'}
-            </Button>
-          </form>
-        </Card>
-      )}
 
       <ErrorText>{error}</ErrorText>
       {!projects && !error && <Spinner />}
-      {projects?.length === 0 && <p className="text-sm text-slate-500">Todavía no hay proyectos.</p>}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {projects?.map((p) => (
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {projects?.map((p, i) => (
           <Link
             key={p.id}
             href={`/projects/${p.id}`}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-400"
+            className="group flex flex-col gap-4 rounded-2xl border border-line bg-white p-5 transition hover:border-[#a5b4fc] hover:shadow-[0_6px_24px_rgba(14,17,22,.06)]"
           >
-            <h2 className="font-semibold">{p.name}</h2>
-            {p.description && <p className="mt-1 line-clamp-2 text-sm text-slate-600">{p.description}</p>}
-            <p className="mt-3 text-xs text-slate-400">Creado el {new Date(p.created_at).toLocaleDateString('es')}</p>
+            <div className="flex items-center gap-3">
+              <span
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                  i % 2 === 0 ? 'bg-brand-soft text-brand' : 'bg-[#e6f4f1] text-[#0f766e]'
+                }`}
+              >
+                <FileIcon size={22} />
+              </span>
+              <div className="flex min-w-0 flex-col">
+                <h2 className="truncate text-[17px] font-semibold group-hover:text-brand">{p.name}</h2>
+                <span className="text-xs text-muted">Creado el {new Date(p.created_at).toLocaleDateString('es')}</span>
+              </div>
+            </div>
+            <p className="line-clamp-2 min-h-[2.5rem] text-sm text-muted">{p.description || 'Sin descripción.'}</p>
           </Link>
         ))}
+
+        {canManage && (
+          <form
+            onSubmit={create}
+            className="flex flex-col gap-3 rounded-2xl border-[1.5px] border-dashed border-line-strong bg-white/50 p-5"
+          >
+            <span className="flex items-center gap-2 text-[15px] font-semibold">
+              <PlusIcon size={18} />
+              Nuevo proyecto
+            </span>
+            <label htmlFor="p-nombre" className="sr-only">Nombre del proyecto</label>
+            <Input id="p-nombre" required minLength={2} placeholder="Nombre del proyecto" value={name} onChange={(e) => setName(e.target.value)} />
+            <label htmlFor="p-desc" className="sr-only">Descripción</label>
+            <Input id="p-desc" placeholder="Descripción (opcional)" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Creando…' : 'Crear proyecto'}
+            </Button>
+          </form>
+        )}
       </div>
+      {projects?.length === 0 && !canManage && <p className="text-sm text-muted">Todavía no hay proyectos.</p>}
     </div>
   );
 }
