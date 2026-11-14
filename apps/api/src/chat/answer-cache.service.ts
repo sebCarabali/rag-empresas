@@ -15,12 +15,19 @@ export interface CachedAnswer {
 /** Sube si cambia el prompt, el formato de las fuentes o la lógica de búsqueda. */
 const CACHE_SCHEMA_VERSION = 'v1';
 
+/** Palabras con las que empieza una pregunta que continúa la anterior ("¿y en plano?"). */
+const FOLLOW_UP_START = /^(y|e|o|pero|entonces|tambien|ademas|igual|mismo|lo mismo|otra vez|de nuevo|mas|menos|ahora|y si|y que|y cual|y cuales|y cuantos|y cuantas|y el|y la|y los|y las|solo|sino|por que no)\b/;
+
+/** Referencias a algo dicho antes en la conversación. */
+const FOLLOW_UP_REFERENCE = /\b(es[ao]s?|est[ao]s?|aquell[ao]s?|ese|este|aquel|ell[ao]s?|anterior(es)?|mencionad[ao]s?|dich[ao]s?|previ[ao]s?|ultim[ao]s?|primer[ao]s?|segund[ao]s?|tercer[ao]s?|la otra|el otro|los otros|las otras|lo que dijiste|me dijiste|arriba|de la lista|de esa lista|cual de|cuales de|de ellas|de ellos)\b/;
+
 /**
- * Caché de respuestas por proyecto. Solo se usa en la primera pregunta de una
- * conversación (sin historial), que es cuando la misma pregunta da la misma
- * respuesta. La clave incluye una "versión" del contenido del proyecto
- * (cantidad de documentos y su última modificación): subir, reprocesar o
- * borrar un documento invalida automáticamente lo cacheado.
+ * Caché de respuestas por proyecto. Se usa en cualquier pregunta que se
+ * entienda por sí sola, aunque la conversación ya tenga mensajes; se salta en
+ * las preguntas de seguimiento ("¿y en plano?", "¿cuál de esas…?"), cuyo
+ * significado depende de lo anterior. La clave incluye una "versión" del
+ * contenido del proyecto: subir, reprocesar o borrar un documento, o cambiar
+ * las descripciones web, invalida automáticamente lo cacheado.
  */
 @Injectable()
 export class AnswerCacheService {
@@ -33,6 +40,18 @@ export class AnswerCacheService {
 
   get enabled(): boolean {
     return this.config.answerCacheTtlHours > 0;
+  }
+
+  /**
+   * ¿La pregunta depende de la conversación anterior? En la primera pregunta
+   * nunca; después, si empieza como continuación, hace referencia a algo dicho
+   * antes o es demasiado corta para entenderse sola.
+   */
+  static isFollowUp(question: string, hasHistory: boolean): boolean {
+    if (!hasHistory) return false;
+    const q = AnswerCacheService.normalizeQuestion(question);
+    if (q.split(' ').length <= 2) return true;
+    return FOLLOW_UP_START.test(q) || FOLLOW_UP_REFERENCE.test(q);
   }
 
   /** "¿Cuántas telas de ALGODÓN hay?" y "cuantas telas de algodon hay" comparten clave. */

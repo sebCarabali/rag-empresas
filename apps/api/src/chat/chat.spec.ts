@@ -175,3 +175,34 @@ test('loadEnrichments: prioriza lo mencionado en la pregunta y lo presente en lo
     ['Chalis', 'Linos', 'Plano'],
   );
 });
+
+test('isFollowUp: la primera pregunta nunca es de seguimiento', () => {
+  assert.equal(AnswerCacheService.isFollowUp('¿y en tejido plano?', false), false);
+});
+
+test('isFollowUp: detecta preguntas que dependen de la conversación', () => {
+  for (const q of [
+    '¿Y en tejido plano?',
+    'y cuales son de algodón',
+    '¿Cuál de esas es la más liviana?',
+    'dame más',
+    'también para niños',
+    '¿Qué peso tiene la anterior?',
+    'Compara las dos primeras',
+    '¿Por qué?',
+  ]) {
+    assert.equal(AnswerCacheService.isFollowUp(q, true), true, q);
+  }
+});
+
+test('isFollowUp: las preguntas que se entienden solas sí usan caché', () => {
+  for (const q of [
+    'dame información de la popelina',
+    '¿Qué telas de algodón 100% hay para niños?',
+    '¿Cuánto pesa la Zupla B?',
+    'Telas florales en punto de Modateks',
+    '¿Cómo se lava el lino?',
+  ]) {
+    assert.equal(AnswerCacheService.isFollowUp(q, true), false, q);
+  }
+});
