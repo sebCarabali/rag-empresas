@@ -325,6 +325,9 @@ export function ChatbotSettings() {
                       >
                         {copied ? 'Copiado ✓' : 'Copiar código'}
                       </button>
+                      <Link href={`/docs/widget?bot=${bot.public_key}`} target="_blank" className="font-medium text-brand hover:text-brand-hover">
+                        Guía de instalación
+                      </Link>
                       {bot.widget_enabled && (
                         <a href={`/embed/${bot.public_key}`} target="_blank" rel="noopener noreferrer" className="text-ink-2 hover:text-ink">
                           Probar el widget
