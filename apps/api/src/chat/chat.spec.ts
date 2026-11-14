@@ -102,7 +102,31 @@ test('Gemini: tras el máximo de rondas fuerza la respuesta sin herramientas', a
   }
   assert.equal(text, 'listo');
   assert.equal(requests.length, 5);
-  assert.equal((requests[4].config as { tools?: unknown }).tools, undefined);
+  // Las herramientas siguen declaradas (el historial tiene llamadas), pero se prohíbe usarlas
+  // y se pide la respuesta explícitamente.
+  const config = requests[4].config as { toolConfig?: { functionCallingConfig?: { mode?: string } } };
+  assert.equal(config.toolConfig?.functionCallingConfig?.mode, 'NONE');
+  const contents = requests[4].contents as Array<{ parts: Array<{ text?: string }> }>;
+  assert.match(contents[contents.length - 1].parts.at(-1)?.text ?? '', /responde ahora/i);
+});
+
+test('Gemini: si termina sin texto, insiste una vez y luego falla para que responda el respaldo', async () => {
+  const call = [{ functionCall: { name: 'contar_productos', args: {} } }];
+  const ok = fakeGemini([call, [], [{ text: 'Hay 166 telas.' }]]);
+  let text = '';
+  for await (const e of ok.service.run('sys', [{ role: 'user', content: 'x' }], {
+    tools: [{ name: 'contar_productos' }],
+    execute: async () => ({ total: 166 }),
+  })) {
+    if (e.type === 'text') text += e.text;
+  }
+  assert.equal(text, 'Hay 166 telas.');
+  assert.equal(ok.requests.length, 3);
+
+  const empty = fakeGemini([[], []]);
+  await assert.rejects(async () => {
+    for await (const _ of empty.service.run('sys', [{ role: 'user', content: 'x' }])) void _;
+  }, /no generó texto/);
 });
 
 test('Gemini: no reenvía el texto de "pensamiento" al usuario', async () => {

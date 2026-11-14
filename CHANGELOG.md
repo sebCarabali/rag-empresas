@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.10.1] - 2026-11-14
+
+### Corregido
+
+- Gemini a veces terminaba sin texto después de consultar el catálogo (la respuesta quedaba vacía, no se cacheaba y cada repetición volvía a consultar). En la última ronda se mantienen las herramientas declaradas pero se prohíbe usarlas y se pide la respuesta explícitamente; si aun así no hay texto, se insiste una vez y luego responde el respaldo (o la respuesta guardada).
+- La caché ya no se invalida al cambiar el nombre, el idioma o las instrucciones del asistente: una respuesta de Gemini guardada se devuelve en cualquier conversación del proyecto. Solo se separan el chat interno y el widget público.
+
 ## [0.10.0] - 2026-11-14
 
 ### Agregado
