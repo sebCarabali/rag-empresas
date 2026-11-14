@@ -166,3 +166,10 @@ test('Groq: acumula la llamada a herramienta, la ejecuta y luego responde', asyn
     globalThis.fetch = originalFetch;
   }
 });
+
+test('con allowFallback=false no se usa Groq aunque haya clave', async () => {
+  const cfg = config();
+  const groq = Object.assign(fakeProvider([{ type: 'text', text: 'groq' }]), { enabled: true, model: 'g' });
+  const llm = new LlmService(fakeProvider([], new Error('503 UNAVAILABLE')) as never, groq as never, cfg);
+  await assert.rejects(collect(llm.run('s', [], { allowFallback: false })));
+});

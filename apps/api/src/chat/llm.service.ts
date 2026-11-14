@@ -53,7 +53,14 @@ export class LlmService {
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; geminiApiKey?: string | null } = {},
+    options: {
+      tools?: FunctionDeclaration[];
+      execute?: ToolExecutor;
+      signal?: AbortSignal;
+      geminiApiKey?: string | null;
+      /** false: si Gemini falla, se lanza el error en vez de usar Groq. */
+      allowFallback?: boolean;
+    } = {},
   ): AsyncGenerator<LlmEvent> {
     const keyOwner = options.geminiApiKey ? 'company' : 'platform';
     yield { type: 'model', info: { provider: 'gemini', model: this.config.geminiModel, fallback: false, keyOwner } };
@@ -84,7 +91,7 @@ export class LlmService {
     } catch (err) {
       if (options.signal?.aborted) throw err; // el usuario canceló: no hay respaldo
       const failure = timedOut ? new FirstEventTimeout() : err;
-      if (!this.config.llmFallback || !this.groq.enabled) throw failure;
+      if (options.allowFallback === false || !this.config.llmFallback || !this.groq.enabled) throw failure;
 
       const reason = describeFailure(failure);
       this.logger.warn(`${reason} (${(err as Error)?.message ?? err}); se responde con Groq ${this.groq.model}`);
