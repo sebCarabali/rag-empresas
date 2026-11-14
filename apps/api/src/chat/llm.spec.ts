@@ -48,7 +48,7 @@ test('sin errores responde Gemini y no cambia de modelo', async () => {
   const cfg = config();
   const llm = new LlmService(fakeProvider([{ type: 'text', text: 'hola' }]) as never, new GroqService(cfg), cfg);
   const events = await collect(llm.run('s', []));
-  assert.deepEqual(events[0], { type: 'model', info: { provider: 'gemini', model: cfg.geminiModel, fallback: false } });
+  assert.deepEqual(events[0], { type: 'model', info: { provider: 'gemini', model: cfg.geminiModel, fallback: false, keyOwner: 'platform' } });
   assert.equal(text(events), 'hola');
 });
 

@@ -12,6 +12,8 @@ export interface ModelInfo {
   fallback: boolean;
   /** Motivo del cambio, en lenguaje claro. */
   reason?: string;
+  /** De quién es la clave de Gemini usada: de la empresa o de la plataforma. */
+  keyOwner?: 'company' | 'platform';
 }
 
 export type LlmEvent =
@@ -51,9 +53,10 @@ export class LlmService {
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal } = {},
+    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; geminiApiKey?: string | null } = {},
   ): AsyncGenerator<LlmEvent> {
-    yield { type: 'model', info: { provider: 'gemini', model: this.config.geminiModel, fallback: false } };
+    const keyOwner = options.geminiApiKey ? 'company' : 'platform';
+    yield { type: 'model', info: { provider: 'gemini', model: this.config.geminiModel, fallback: false, keyOwner } };
 
     // Señal propia para poder cortar a Gemini si tarda demasiado en empezar.
     const geminiAbort = new AbortController();
@@ -67,7 +70,12 @@ export class LlmService {
 
     let emitted = false;
     try {
-      for await (const event of this.gemini.run(systemInstruction, turns, { ...options, signal: geminiAbort.signal })) {
+      for await (const event of this.gemini.run(systemInstruction, turns, {
+        tools: options.tools,
+        execute: options.execute,
+        signal: geminiAbort.signal,
+        apiKey: options.geminiApiKey ?? undefined,
+      })) {
         clearTimeout(timer);
         emitted = true;
         yield event;
@@ -82,7 +90,7 @@ export class LlmService {
       this.logger.warn(`${reason} (${(err as Error)?.message ?? err}); se responde con Groq ${this.groq.model}`);
       if (emitted) yield { type: 'reset' };
       yield { type: 'model', info: { provider: 'groq', model: this.groq.model, fallback: true, reason } };
-      yield* this.groq.run(systemInstruction, turns, options);
+      yield* this.groq.run(systemInstruction, turns, { tools: options.tools, execute: options.execute, signal: options.signal });
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', onOuterAbort);

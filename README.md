@@ -33,6 +33,35 @@ Supabase Storage    Supabase Postgres + pgvector (RLS por empresa)
 - Solo el worker usa la `service_role` key.
 - El prompt trata los fragmentos como datos, no como instrucciones, para mitigar *prompt injection* desde documentos subidos.
 
+### Asistente personalizable y widget
+
+Cada proyecto tiene su asistente (`chatbots`), configurable en **Proyecto → Asistente y widget** (owner/admin):
+
+- **Personalización** (app y widget): nombre, color, logo, mensaje de bienvenida, preguntas sugeridas, idioma e instrucciones de tono y estilo. Las instrucciones se agregan al prompt dentro de `<instrucciones_empresa>` y no pueden anular las reglas de base (usar solo el contexto, no inventar, citar).
+- **Widget para el sitio web:** la empresa pega una línea antes de `</body>`:
+
+  ```html
+  <script src="https://rag-empresas-web.vercel.app/widget.js" data-bot="bot_xxx" async></script>
+  ```
+
+  Muestra un botón flotante (`data-position="left"` para ponerlo a la izquierda) que abre el chat en un iframe (`/embed/<clave>`).
+- **Seguridad del widget:**
+  - El iframe solo se puede insertar en los **dominios autorizados** (`Content-Security-Policy: frame-ancestors`, en `proxy.ts`).
+  - La API pública (`/widget/:clave/...`) solo accede al proyecto de ese chatbot, limita 10 mensajes por minuto por visitante y aplica un **tope diario** configurable (`widget_usage`).
+  - No envía fuentes ni detalles del modelo al navegador salvo que se active «Mostrar fuentes».
+  - El historial vive solo en el navegador del visitante.
+  - El widget es público: actívalo solo en proyectos con información para clientes.
+- La clave pública se puede regenerar; la anterior deja de funcionar.
+
+### Clave de Gemini por empresa
+
+En **Configuración de la empresa** (owner/admin) cada empresa puede cargar su propia clave de Gemini. Así el chat y las descripciones web de sus proyectos usan su cuenta y su cuota.
+
+- La API comprueba la clave contra Gemini antes de guardarla.
+- Se guarda **cifrada en Supabase Vault** mediante `set_company_gemini_key`. `company_secrets` solo guarda la referencia y los últimos 4 caracteres.
+- Solo `service_role` puede descifrarla (`get_company_gemini_key`): nunca llega al navegador.
+- Sin clave propia se usa `GEMINI_API_KEY` de la plataforma. El respaldo en Groq es siempre el de la plataforma.
+
 ### Descripciones web de las telas
 
 Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma cola. Para cada valor distinto de los campos de `ENRICH_FIELDS` (por defecto `Familia` y `Tipo de tejido`), le pide a Gemini, **con Google Search**, una descripción general: qué es, características, usos y cuidados. Le pasa como contexto las composiciones y los tipos de tejido más frecuentes de esa familia en el catálogo. El resultado se guarda en `catalog_enrichments` con sus fuentes web.

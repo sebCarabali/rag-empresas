@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { api, type Conversation, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
+import { api, type Chatbot, type Conversation, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
 import { Button, ErrorText } from './ui';
 
 interface ChatMessage {
@@ -15,7 +15,9 @@ interface ChatMessage {
   streaming?: boolean;
 }
 
-export function ChatPanel({ projectId }: { projectId: string }) {
+export function ChatPanel({ projectId, bot }: { projectId: string; bot?: Chatbot | null }) {
+  const color = bot?.primary_color ?? '#0f172a';
+  const botName = bot?.name ?? 'Asistente';
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -23,6 +25,7 @@ export function ChatPanel({ projectId }: { projectId: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const tempId = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,9 +80,9 @@ export function ChatPanel({ projectId }: { projectId: string }) {
     }
   }
 
-  async function send(e?: FormEvent) {
+  async function send(e?: FormEvent, text?: string) {
     e?.preventDefault();
-    const question = input.trim();
+    const question = (text ?? input).trim();
     if (!question || sending) return;
     setError(null);
     setSending(true);
@@ -87,7 +90,8 @@ export function ChatPanel({ projectId }: { projectId: string }) {
 
     try {
       const conversationId = activeId ?? (await newConversation());
-      const assistantId = `tmp-${Date.now()}`;
+      tempId.current += 1;
+      const assistantId = `tmp-${tempId.current}`;
       setMessages((m) => [
         ...m,
         { id: `${assistantId}-q`, role: 'user', content: question, sources: [] },
@@ -166,12 +170,35 @@ export function ChatPanel({ projectId }: { projectId: string }) {
       <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white">
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
           {messages.length === 0 && (
-            <div className="flex h-full items-center justify-center text-center text-sm text-slate-500">
-              Haz una pregunta sobre los documentos de este proyecto.
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-slate-500">
+              {bot?.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={bot.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold text-white" style={{ background: color }}>
+                  {botName.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <p className="font-medium text-slate-800">{botName}</p>
+              <p className="max-w-md">{bot?.welcome_message || 'Haz una pregunta sobre los documentos de este proyecto.'}</p>
+              {(bot?.suggested_questions.length ?? 0) > 0 && (
+                <div className="flex max-w-lg flex-wrap justify-center gap-2">
+                  {bot!.suggested_questions.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => void send(undefined, q)}
+                      className="rounded-full border px-3 py-1 text-xs hover:bg-slate-50"
+                      style={{ borderColor: color, color }}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
+            <MessageBubble key={m.id} message={m} color={color} />
           ))}
           <div ref={bottomRef} />
         </div>
@@ -205,14 +232,13 @@ export function ChatPanel({ projectId }: { projectId: string }) {
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({ message, color }: { message: ChatMessage; color: string }) {
   const isUser = message.role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
-          isUser ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
-        }`}
+        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${isUser ? 'text-white' : 'bg-slate-100 text-slate-900'}`}
+        style={isUser ? { background: color } : undefined}
       >
         {!isUser && (message.toolCalls?.length ?? 0) > 0 && (
           <ul className="mb-2 space-y-1">
@@ -241,7 +267,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
         {!isUser && !message.streaming && (message.modelInfo || message.cached) && (
           <p className="mt-1 text-[11px] text-slate-400">
-            {message.modelInfo && `${message.modelInfo.provider === 'groq' ? 'Groq' : 'Gemini'} · ${message.modelInfo.model}`}
+            {message.modelInfo &&
+              `${message.modelInfo.provider === 'groq' ? 'Groq' : 'Gemini'} · ${message.modelInfo.model}${
+                message.modelInfo.keyOwner === 'company' ? ' · clave de la empresa' : ''
+              }`}
             {message.modelInfo && message.cached && ' · '}
             {message.cached && 'Respuesta desde caché'}
           </p>
