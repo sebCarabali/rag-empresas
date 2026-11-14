@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.19.0] - 2026-11-14
+
+### Agregado
+
+- Página pública de documentación `/docs/widget`: guía paso a paso para poner el asistente en el sitio de la empresa, con ilustraciones de las pantallas y del flujo, explorador de los campos de configuración, selector de modo (público o protegido) con diagrama, generador de código para HTML, WordPress, Shopify, Google Tag Manager y React/Next.js, ejemplos de `/chat-token` en C#, Java, Node, PHP y cURL, simulador del widget (nombre, color, bienvenida, preguntas sugeridas, posición), prueba con el asistente real, lista de verificación, buscador de problemas frecuentes y referencia de atributos.
+- Enlaces «Guía de instalación» en Asistente y widget (con la clave ya cargada) y en la página de inicio.
+
 ## [0.18.0] - 2026-11-14
 
 ### Agregado
