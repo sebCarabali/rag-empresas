@@ -6,8 +6,8 @@
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/main.js",
-    "start:dev": "tsc-watch -p tsconfig.build.json --onSuccess \"node dist/main.js\"",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "start:dev": "tsc-watch -p tsconfig.build.json --onSuccess \"node --env-file-if-exists=.env dist/main.js\"",
     "test": "rimraf .test-dist && tsc -p tsconfig.json --outDir .test-dist && node --test \".test-dist/**/*.spec.js\""
   },
   "engines": {

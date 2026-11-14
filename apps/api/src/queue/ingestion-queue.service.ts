@@ -20,7 +20,12 @@ export const MAX_DELIVERIES = 4;
 @Injectable()
 export class IngestionQueueService {
   private readonly logger = new Logger(IngestionQueueService.name);
-  private readonly client = new QueueClient();
+  private _client?: QueueClient;
+
+  /** Se crea al primer uso para no requerir Vercel en desarrollo local. */
+  private get client(): QueueClient {
+    return (this._client ??= new QueueClient());
+  }
 
   constructor(
     private readonly config: AppConfig,
