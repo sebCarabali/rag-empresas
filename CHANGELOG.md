@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.8.0] - 2026-11-14
+
+### Cambiado
+
+- La caché de respuestas guarda también las respuestas del modelo de respaldo (Groq), con la indicación del modelo que las generó.
+
 ## [0.7.1] - 2026-11-14
 
 ### Corregido
