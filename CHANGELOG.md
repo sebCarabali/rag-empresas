@@ -2,6 +2,17 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.13.0] - 2026-11-14
+
+### Agregado
+
+- Página de prueba del widget (`apps/widget-demo`), publicada como proyecto aparte en Vercel: simula el sitio de una empresa en otro dominio y revisa paso a paso el script, la configuración, el botón y el chat dentro del iframe.
+- El chat del widget avisa al sitio que lo inserta cuando está listo (`rag-widget-ready`).
+
+### Corregido
+
+- La API rechazaba por CORS la configuración pública del widget pedida desde el sitio de la empresa, así que el botón nunca aparecía fuera de la app. Ahora `/widget/:clave/config` acepta cualquier dominio (solo GET); el resto de la API sigue limitado a la app web.
+
 ## [0.12.0] - 2026-11-14
 
 ### Agregado

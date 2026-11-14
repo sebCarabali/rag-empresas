@@ -44,7 +44,17 @@ export function WidgetChat() {
   const sessionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    widgetApi.config(publicKey).then(setConfig, () => setUnavailable(true));
+    widgetApi.config(publicKey).then(
+      (cfg) => {
+        setConfig(cfg);
+        // Aviso al sitio que inserta el widget (lo usa la página de prueba para el diagnóstico).
+        window.parent.postMessage({ type: 'rag-widget-ready', name: cfg.name }, '*');
+      },
+      () => {
+        setUnavailable(true);
+        window.parent.postMessage({ type: 'rag-widget-unavailable' }, '*');
+      },
+    );
   }, [publicKey]);
 
   useEffect(() => {
