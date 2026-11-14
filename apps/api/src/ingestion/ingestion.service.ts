@@ -15,6 +15,8 @@ export interface IngestionJob {
 export interface IngestionResult {
   /** Si el documento no terminó dentro del presupuesto de tiempo, el siguiente lote. */
   next?: IngestionJob;
+  /** Proyecto cuyo catálogo cambió: hay que generar descripciones web nuevas. */
+  enrichProjectId?: string;
 }
 
 /** Errores que no se arreglan reintentando: el documento se marca como fallido de inmediato. */
@@ -121,7 +123,7 @@ export class IngestionService {
 
     await this.updateDocument(doc.id, { status: 'ready', chunk_count: chunks.length, error: null });
     this.logger.log(`Documento ${doc.id} listo: ${chunks.length} chunks en ${Date.now() - started} ms`);
-    return {};
+    return doc.mime_type === 'text/csv' ? { enrichProjectId: doc.project_id } : {};
   }
 
   private async replaceCatalog(

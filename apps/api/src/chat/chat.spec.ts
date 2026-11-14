@@ -153,3 +153,25 @@ test('herramienta de catálogo: arma los parámetros del RPC y registra fuentes'
   assert.equal(calls[0].summary, 'Peso < 120 · ordenado por Peso ↑');
   assert.equal(calls[0].total, 722);
 });
+
+test('loadEnrichments: prioriza lo mencionado en la pregunta y lo presente en los productos', async () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { loadEnrichments } = require('./enrichment-context');
+  const rows = [
+    { field: 'Familia', value: 'Chalis', description: 'Tela fluida de viscosa…', sources: [] },
+    { field: 'Familia', value: 'Linos', description: 'Tela fresca…', sources: [] },
+    { field: 'Tipo de tejido', value: 'Plano', description: 'Tejido de urdimbre y trama…', sources: [] },
+    { field: 'Familia', value: 'Jacquard', description: 'Con dibujo tejido…', sources: [] },
+  ];
+  const query = { eq: () => query, limit: async () => ({ data: rows, error: null }) };
+  const db = { from: () => ({ select: () => query }) };
+  const chunks = [
+    { content: 'Tela A\nFamilia: Linos\nTipo de tejido: Plano' },
+    { content: 'Tela B\nFamilia: Linos\nTipo de tejido: Plano' },
+  ];
+  const result = await loadEnrichments(db, 'p1', '¿Qué es el chalis y para qué sirve?', chunks);
+  assert.deepEqual(
+    result.map((r: { value: string }) => r.value),
+    ['Chalis', 'Linos', 'Plano'],
+  );
+});
