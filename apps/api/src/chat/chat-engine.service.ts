@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createHash } from 'node:crypto';
 import { CompanyKeysService } from '../companies/company-keys.service';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { AnswerCacheService, type CachedAnswer } from './answer-cache.service';
@@ -193,10 +192,11 @@ export class ChatEngineService {
   }
 }
 
+/**
+ * Parte de la clave de caché que depende del asistente. Solo distingue el chat
+ * interno del widget público (que oculta datos internos); cambiar el nombre, el
+ * idioma o las instrucciones no invalida las respuestas ya guardadas.
+ */
 function botVariant(bot: BotProfile | null): string {
-  if (!bot) return '';
-  return createHash('sha256')
-    .update([bot.audience, bot.name, bot.language, bot.instructions ?? ''].join('\u0000'))
-    .digest('hex')
-    .slice(0, 16);
+  return bot?.audience ?? '';
 }
