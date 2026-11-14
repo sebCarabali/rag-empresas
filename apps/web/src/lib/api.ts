@@ -1,6 +1,6 @@
 import { getSupabase } from './supabase/client';
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001').replace(/\/$/, '');
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001').replace(/\/$/, '');
 
 export type Role = 'owner' | 'admin' | 'editor' | 'viewer';
 export type DocumentStatus = 'uploading' | 'pending' | 'processing' | 'ready' | 'failed';
@@ -97,6 +97,18 @@ export interface CacheMatch {
   kind: 'exact' | 'semantic';
   question?: string;
   similarity?: number;
+}
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  last4: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  /** Solo en la respuesta de creación. */
+  key?: string;
 }
 
 export interface UsageDay {
@@ -212,6 +224,7 @@ export interface Chatbot {
   allowed_origins: string[];
   daily_message_limit: number;
   widget_show_sources: boolean;
+  widget_auth: 'public' | 'token';
 }
 
 export interface CompanySettings {
@@ -252,6 +265,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  apiKeys: (projectId: string) => request<ApiKey[]>('GET', `/projects/${projectId}/api-keys`),
+  createApiKey: (projectId: string, name: string) => request<ApiKey>('POST', `/projects/${projectId}/api-keys`, { name }),
+  revokeApiKey: (projectId: string, keyId: string) => request<void>('DELETE', `/projects/${projectId}/api-keys/${keyId}`),
+  widgetTestToken: (projectId: string) =>
+    request<{ token: string; expiresAt: string }>('POST', `/projects/${projectId}/chatbot/test-token`),
   usage: (projectId: string, days = 30) =>
     request<UsageReport>(
       'GET',
@@ -410,6 +428,9 @@ export async function readNdjson(res: Response, onEvent: (event: StreamEvent) =>
   }
 }
 
+/** El token del widget (modo protegido) venció o no es válido. */
+export class WidgetTokenError extends Error {}
+
 /** API pública del widget (sin sesión). */
 export const widgetApi = {
   config: async (publicKey: string) => {
@@ -422,6 +443,7 @@ export const widgetApi = {
       primaryColor: string;
       avatarUrl: string | null;
       showSources: boolean;
+      auth?: 'public' | 'token';
     };
   },
   ask: async (
@@ -431,24 +453,33 @@ export const widgetApi = {
     sessionId: string,
     onEvent: (event: StreamEvent) => void,
     signal?: AbortSignal,
+    token?: string | null,
   ) => {
     const res = await fetch(`${API_URL}/widget/${publicKey}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Widget-Token': token } : {}) },
       body: JSON.stringify({ content, history, sessionId }),
       signal,
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      if (data.code === 'widget_token_invalid') throw new WidgetTokenError(data.message);
       onEvent({ type: 'error', message: data.message ?? `Error ${res.status}` });
       return;
     }
     await readNdjson(res, onEvent);
   },
-  rate: async (publicKey: string, messageId: string, sessionId: string, rating: -1 | 1, comment?: string) => {
+  rate: async (
+    publicKey: string,
+    messageId: string,
+    sessionId: string,
+    rating: -1 | 1,
+    comment?: string,
+    token?: string | null,
+  ) => {
     const res = await fetch(`${API_URL}/widget/${publicKey}/messages/${messageId}/feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Widget-Token': token } : {}) },
       body: JSON.stringify({ sessionId, rating, comment }),
     });
     if (!res.ok) throw new ApiError('No se pudo guardar la valoración', res.status);

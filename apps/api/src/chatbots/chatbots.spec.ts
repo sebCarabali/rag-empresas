@@ -41,9 +41,10 @@ test('publicConfig no expone datos de administración', () => {
   const cfg = publicConfig({
     id: 'b', company_id: 'c', project_id: 'p', name: 'Teka', welcome_message: 'Hola', instructions: 'secreto',
     suggested_questions: ['¿Qué telas hay?'], primary_color: '#112233', avatar_url: null, language: 'es',
-    widget_enabled: true, public_key: 'bot_x', allowed_origins: ['https://a.com'], daily_message_limit: 5, widget_show_sources: false,
+    widget_enabled: true, public_key: 'bot_x', allowed_origins: ['https://a.com'], daily_message_limit: 5, widget_show_sources: false, widget_auth: 'token',
   });
   assert.equal('instructions' in cfg, false);
   assert.equal('daily_message_limit' in cfg, false);
   assert.equal(cfg.name, 'Teka');
+  assert.equal(cfg.auth, 'token');
 });

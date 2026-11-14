@@ -66,6 +66,10 @@ class ChatbotDto {
 
   @IsBoolean()
   widget_show_sources: boolean;
+
+  /** public: clave pública + dominios · token: además exige un token del servidor de la empresa. */
+  @IsIn(['public', 'token'])
+  widget_auth: 'public' | 'token';
 }
 
 /** "empresa.com/tienda" → "https://empresa.com"; valida que sea un origen web. */

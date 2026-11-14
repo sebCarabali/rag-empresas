@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ApiKeysService } from '../api-keys/api-keys.service';
 import { CacheWarmService } from '../cache/cache-warm.service';
 import { AnswerCacheService } from '../chat/answer-cache.service';
 import { ChatEngineService } from '../chat/chat-engine.service';
@@ -31,6 +32,7 @@ const SHARED = [
   ChatbotsService,
   EvalRunnerService,
   CacheWarmService,
+  ApiKeysService,
 ];
 
 @Module({ providers: SHARED, exports: SHARED })

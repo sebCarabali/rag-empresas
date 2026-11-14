@@ -20,7 +20,8 @@ import { Public } from '../auth/auth.guard';
 import { ChatEngineService } from '../chat/chat-engine.service';
 import type { ChatTurn } from '../chat/gemini.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { ChatbotsService, publicConfig } from './chatbots.service';
+import { ApiKeysService } from '../api-keys/api-keys.service';
+import { ChatbotsService, publicConfig, type ChatbotRow } from './chatbots.service';
 
 class HistoryTurn {
   @IsIn(['user', 'assistant'])
@@ -96,7 +97,20 @@ export class WidgetController {
     private readonly supabase: SupabaseService,
     private readonly chatbots: ChatbotsService,
     private readonly engine: ChatEngineService,
+    private readonly keys: ApiKeysService,
   ) {}
+
+  /** En modo protegido, cada petición del widget debe traer un token vigente emitido por la empresa. */
+  private requireToken(bot: ChatbotRow, req: Request) {
+    if (bot.widget_auth !== 'token') return;
+    const token = String(req.headers['x-widget-token'] ?? '');
+    if (!this.keys.checkToken(token, bot.id)) {
+      throw new HttpException(
+        { statusCode: 401, code: 'widget_token_invalid', message: 'La sesión del chat venció. Recarga la página.' },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
 
   @Get(':publicKey/config')
   async config(@Param('publicKey') publicKey: string) {
@@ -115,6 +129,7 @@ export class WidgetController {
     const db = this.supabase.admin;
     const bot = await this.chatbots.findByPublicKey(db, publicKey);
     if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
+    this.requireToken(bot, req);
 
     const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
     if (!allowIp(`${bot.id}:${ip}`)) {
@@ -195,10 +210,12 @@ export class WidgetController {
     @Param('publicKey') publicKey: string,
     @Param('messageId', ParseUUIDPipe) messageId: string,
     @Body() dto: WidgetFeedbackDto,
+    @Req() req: Request,
   ) {
     const db = this.supabase.admin;
     const bot = await this.chatbots.findByPublicKey(db, publicKey);
     if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
+    this.requireToken(bot, req);
     const { data, error } = await db
       .from('widget_messages')
       .update({ rating: dto.rating, feedback_comment: dto.comment?.trim() || null, feedback_at: new Date().toISOString() })
