@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.13.1] - 2026-11-14
+
+### Corregido
+
+- Página de prueba del widget: el campo de la clave mostraba un error de formato genérico (por ejemplo, al escribir el nombre del asistente). Ahora acepta la clave o el código `<script>` completo y explica qué falta.
+
 ## [0.13.0] - 2026-11-14
 
 ### Agregado

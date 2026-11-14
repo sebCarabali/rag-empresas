@@ -92,9 +92,10 @@
     </div>
     <div class="body">
       <form id="form" class="body" style="padding:0">
-        <label>Clave pública del chatbot (data-bot)
-          <input id="bot" name="bot" placeholder="bot_…" pattern="bot_[0-9a-f]{32}" required autocomplete="off" />
+        <label>Clave pública del chatbot (empieza por <code>bot_</code>; no es el nombre del asistente)
+          <input id="bot" name="bot" placeholder="bot_… o pega aquí el código &lt;script&gt; completo" autocomplete="off" spellcheck="false" />
         </label>
+        <p id="botError" class="check-detail" style="margin:-4px 0 0;color:var(--bad);display:none"></p>
         <label>URL de la app web (donde está widget.js)
           <input id="app" name="app" type="url" required />
         </label>
@@ -135,7 +136,7 @@
     var saved = {};
     try { saved = JSON.parse(localStorage.getItem('widget-demo') || '{}'); } catch (e) {}
     var cfg = {
-      bot: params.get('bot') || saved.bot || '',
+      bot: (/bot_[0-9a-f]{32}/i.exec(params.get('bot') || saved.bot || '') || [''])[0].toLowerCase(),
       app: (params.get('app') || saved.app || DEFAULTS.app).replace(/\/$/, ''),
       api: (params.get('api') || saved.api || DEFAULTS.api).replace(/\/$/, ''),
       pos: params.get('pos') === 'left' ? 'left' : (params.get('pos') || saved.pos || DEFAULTS.pos),
@@ -159,9 +160,30 @@
     $('panelHead').addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePanel(); } });
 
     // Al cambiar la configuración se recarga la página: widget.js se instala una sola vez por página.
+    // Acepta la clave sola o el código <script> completo copiado de «Asistente y widget».
+    function extractKey(text) {
+      var m = /bot_[0-9a-f]{32}/i.exec(text || '');
+      return m ? m[0].toLowerCase() : null;
+    }
     $('form').addEventListener('submit', function (e) {
       e.preventDefault();
-      var next = { bot: $('bot').value.trim(), app: $('app').value.trim(), api: $('api').value.trim(), pos: $('pos').value };
+      var raw = $('bot').value;
+      var key = extractKey(raw);
+      if (!key) {
+        $('botError').style.display = 'block';
+        $('botError').textContent = raw.trim()
+          ? '«' + raw.trim().slice(0, 40) + '» no es una clave válida. La clave empieza por bot_ y tiene 32 letras y números; está en «Asistente y widget» → «Código para insertar», en data-bot="…".'
+          : 'Escribe la clave pública del chatbot.';
+        $('bot').focus();
+        return;
+      }
+      var appFromSnippet = /src="(https?:\/\/[^"\/]+)\/widget\.js"/.exec(raw);
+      var next = {
+        bot: key,
+        app: (appFromSnippet ? appFromSnippet[1] : $('app').value).trim(),
+        api: $('api').value.trim(),
+        pos: /data-position="left"/.test(raw) ? 'left' : $('pos').value,
+      };
       try { localStorage.setItem('widget-demo', JSON.stringify(next)); } catch (err) {}
       location.search = new URLSearchParams(next).toString();
     });
