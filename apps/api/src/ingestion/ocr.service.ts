@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { geminiClient } from '../chat/gemini.service';
 import { AppConfig } from '../config/app-config';
+import { geminiUsage, UsageService } from '../usage/usage.service';
 import type { TextSection } from './text-extractor';
 
 /** Por encima de este tamaño el archivo se sube con la Files API en vez de ir dentro de la petición. */
@@ -33,9 +34,17 @@ export function splitOcrPages(text: string): TextSection[] {
 export class OcrService {
   private readonly logger = new Logger(OcrService.name);
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly usage: UsageService,
+  ) {}
 
-  async transcribe(buffer: Buffer, mimeType: string, apiKey?: string | null): Promise<TextSection[]> {
+  async transcribe(
+    buffer: Buffer,
+    mimeType: string,
+    apiKey?: string | null,
+    context?: { companyId: string; projectId: string },
+  ): Promise<TextSection[]> {
     const ai = geminiClient(apiKey || this.config.geminiApiKey);
     const started = Date.now();
 
@@ -58,6 +67,17 @@ export class OcrService {
         contents: [{ role: 'user', parts: [filePart, { text: OCR_PROMPT }] }],
       });
       const text = response.text ?? '';
+      if (context) {
+        void this.usage.record({
+          ...context,
+          channel: 'ocr',
+          provider: 'gemini',
+          model: this.config.geminiModel,
+          keyOwner: apiKey ? 'company' : 'platform',
+          usage: geminiUsage(response.usageMetadata),
+          durationMs: Date.now() - started,
+        });
+      }
       const sections = splitOcrPages(text);
       this.logger.log(`OCR: ${sections.length} páginas, ${text.length} caracteres en ${Date.now() - started} ms`);
       return sections;

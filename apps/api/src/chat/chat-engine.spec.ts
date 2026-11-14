@@ -13,14 +13,27 @@ function fakeDb() {
   return { from: () => chain, rpc: async () => ({ data: [], error: null }) };
 }
 
-function engineWith(events: LlmEvent[], options: { cached?: Record<string, unknown>; geminiFails?: boolean } = {}) {
+function engineWith(
+  events: LlmEvent[],
+  options: {
+    cached?: Record<string, unknown>;
+    geminiFails?: boolean;
+    similar?: Array<{ cache_key: string; question: string; similarity: number }>;
+    vocabulary?: string[];
+  } = {},
+) {
   const puts: Array<Record<string, unknown>> = [];
+  const recorded: Array<Record<string, unknown>> = [];
   const runs: Array<Record<string, unknown>> = [];
   const cache = {
     enabled: true,
     contentVersion: async () => 'v1',
     key: () => 'clave',
-    get: async () => options.cached ?? null,
+    semanticEnabled: Boolean(options.similar),
+    // La entrada exacta no existe cuando se prueba la caché por significado.
+    get: async (key: string) => (options.similar ? (key === 'parecida' ? options.cached : null) : (options.cached ?? null)),
+    similar: async () => options.similar ?? [],
+    vocabulary: async () => new Set(options.vocabulary ?? []),
     put: async (_k: string, _p: string, _q: string, value: Record<string, unknown>) => {
       puts.push(value);
     },
@@ -37,8 +50,9 @@ function engineWith(events: LlmEvent[], options: { cached?: Record<string, unkno
     llm as never,
     cache as never,
     { getGeminiKey: async () => null } as never,
+    { record: async (e: Record<string, unknown>) => void recorded.push(e) } as never,
   );
-  return { engine, puts, runs };
+  return { engine, puts, runs, recorded };
 }
 
 const input = () => ({
@@ -127,4 +141,41 @@ test('sin caché previa se permite el respaldo en Groq', async () => {
   const { engine, runs } = engineWith([{ type: 'text', text: 'x' }]);
   await engine.ask(input());
   assert.equal(runs[0].allowFallback, true);
+});
+
+test('caché por significado: reutiliza una pregunta parecida con los mismos términos', async () => {
+  const cached = { answer: 'Hay 166 telas.', sources: [], toolCalls: [], modelInfo: { provider: 'gemini', model: 'g', fallback: false } };
+  const { engine, runs, recorded } = engineWith([], {
+    cached,
+    similar: [{ cache_key: 'parecida', question: 'telas de algodón para niños', similarity: 0.95 }],
+    vocabulary: ['algodon'],
+  });
+  const result = await engine.ask({ ...input(), question: '¿Qué algodones tienen para bebés?' });
+  assert.equal(result.cached, true);
+  assert.equal(result.answer, 'Hay 166 telas.');
+  assert.deepEqual(result.cacheMatch, { kind: 'semantic', question: 'telas de algodón para niños', similarity: 0.95 });
+  assert.equal(runs.length, 0);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(recorded[0].cacheMatch, 'semantic');
+});
+
+test('caché por significado: descarta si cambia un término del catálogo', async () => {
+  const cached = { answer: 'Algodón…', sources: [], toolCalls: [], modelInfo: { provider: 'gemini', model: 'g', fallback: false } };
+  const { engine, runs } = engineWith(
+    [
+      { type: 'model', info: { provider: 'gemini', model: 'g', fallback: false } },
+      { type: 'text', text: 'Poliéster…' },
+      { type: 'usage', input: 1000, output: 200 },
+    ],
+    {
+      cached,
+      similar: [{ cache_key: 'parecida', question: 'telas de algodón para niños', similarity: 0.97 }],
+      vocabulary: ['algodon', 'poliester'],
+    },
+  );
+  const result = await engine.ask({ ...input(), question: 'telas de poliéster para niños' });
+  assert.equal(result.cached, false);
+  assert.equal(result.answer, 'Poliéster…');
+  assert.deepEqual(result.usage, { input: 1000, output: 200 });
+  assert.equal(runs.length, 1);
 });
