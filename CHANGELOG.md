@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.5.0] - 2026-11-14
+
+### Cambiado
+
+- La caché de respuestas también funciona dentro de una misma conversación para las preguntas que se entienden solas. Las preguntas de seguimiento («¿y en plano?», «¿cuál de esas…?») siguen generándose siempre.
+
 ## [0.4.0] - 2026-11-14
 
 ### Agregado
