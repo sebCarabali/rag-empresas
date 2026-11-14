@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Telas Aurora · sitio de prueba del widget</title>
+  <meta name="robots" content="noindex" />
+  <style>
+    :root {
+      --ink: #1d1b18; --muted: #6b665d; --line: #e6e1d8; --paper: #faf7f2; --card: #fff;
+      --accent: #7a3e2b; --ok: #13795b; --warn: #a15c00; --bad: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--paper); }
+    a { color: inherit; }
+    .banner { background: var(--ink); color: #f3efe7; font-size: 13px; text-align: center; padding: 8px 16px; }
+    .banner strong { color: #ffd9a8; }
+    header.site { display: flex; align-items: center; gap: 24px; padding: 20px 32px; border-bottom: 1px solid var(--line); background: var(--card); }
+    .logo { font-family: Georgia, "Times New Roman", serif; font-size: 26px; letter-spacing: .5px; }
+    .logo span { color: var(--accent); }
+    nav.menu { display: flex; gap: 20px; font-size: 14px; color: var(--muted); }
+    .hero { padding: 48px 32px 24px; max-width: 1100px; margin: 0 auto; }
+    .hero h1 { font-family: Georgia, serif; font-weight: normal; font-size: clamp(28px, 4vw, 44px); margin: 0 0 8px; }
+    .hero p { color: var(--muted); max-width: 640px; margin: 0; line-height: 1.5; }
+    .grid { max-width: 1100px; margin: 24px auto 64px; padding: 0 32px; display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    .product { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    .swatch { height: 150px; }
+    .product div.info { padding: 12px 14px 16px; }
+    .product h3 { margin: 0 0 4px; font-size: 15px; }
+    .product p { margin: 0; font-size: 13px; color: var(--muted); }
+
+    /* Panel de diagnóstico */
+    .panel { position: fixed; left: 20px; bottom: 20px; width: min(400px, calc(100vw - 120px)); max-height: calc(100vh - 40px); overflow: auto;
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.14); z-index: 2147482000; font-size: 13px; }
+    .panel.collapsed .body { display: none; }
+    .panel .head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+    .panel .head strong { font-size: 14px; }
+    .panel .body { padding: 12px 14px 14px; display: grid; gap: 10px; }
+    label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+    input, select { font: inherit; color: var(--ink); padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; width: 100%; }
+    input:focus, select:focus { outline: 2px solid #c9b9a3; border-color: transparent; }
+    .row { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
+    button.primary { font: inherit; font-weight: 600; background: var(--ink); color: #fff; border: 0; border-radius: 8px; padding: 9px 12px; cursor: pointer; }
+    button.link { font: inherit; background: none; border: 0; color: var(--accent); padding: 0; cursor: pointer; text-decoration: underline; }
+    ol.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    ol.checks li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; align-items: start; }
+    .icon { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; background: #c9c3b8; }
+    .ok .icon { background: var(--ok); } .bad .icon { background: var(--bad); } .warn .icon { background: var(--warn); }
+    .wait .icon { animation: pulse 1.2s infinite; }
+    @keyframes pulse { 50% { opacity: .35; } }
+    .check-title { font-weight: 600; }
+    .check-detail { color: var(--muted); margin-top: 2px; line-height: 1.4; word-break: break-word; }
+    .origin { display: flex; gap: 6px; align-items: center; background: var(--paper); border: 1px dashed var(--line); border-radius: 8px; padding: 6px 8px; }
+    .origin code { flex: 1; font-size: 12px; overflow-wrap: anywhere; }
+    pre.snippet { margin: 0; background: #1d1b18; color: #f3efe7; border-radius: 8px; padding: 8px 10px; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; }
+    /* En pantallas anchas el panel ocupa su propia columna y no tapa la página. */
+    @media (min-width: 1000px) {
+      body.panel-left main, body.panel-left header.site { margin-left: 440px; }
+      body.panel-right main, body.panel-right header.site { margin-right: 440px; }
+      .panel { top: 52px; bottom: auto; }
+    }
+    .log { max-height: 120px; overflow: auto; background: var(--paper); border-radius: 8px; padding: 6px 8px; font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="banner"><strong>Sitio de prueba.</strong> «Telas Aurora» es una tienda ficticia para validar el widget del asistente desde otro dominio.</div>
+
+  <header class="site">
+    <div class="logo">Telas <span>Aurora</span></div>
+    <nav class="menu" aria-label="Menú de ejemplo">
+      <a href="#">Telas planas</a><a href="#">Punto</a><a href="#">Infantil</a><a href="#">Contacto</a>
+    </nav>
+  </header>
+
+  <main>
+  <section class="hero">
+    <h1>Telas para confección y decoración</h1>
+    <p>Página de ejemplo. Abre el botón flotante de la esquina para conversar con el asistente y usa el panel de la izquierda para revisar que la instalación esté bien.</p>
+  </section>
+
+  <section class="grid" aria-label="Productos de ejemplo">
+    <article class="product"><div class="swatch" style="background:repeating-linear-gradient(45deg,#e9dcc8 0 6px,#e2d2bb 6px 12px)"></div><div class="info"><h3>Lino natural</h3><p>Tejido plano · 100% lino</p></div></article>
+    <article class="product"><div class="swatch" style="background:linear-gradient(135deg,#b9cfe0,#8fb0c9)"></div><div class="info"><h3>Popelina estampada</h3><p>Tejido plano · algodón</p></div></article>
+    <article class="product"><div class="swatch" style="background:radial-gradient(circle at 30% 30%,#f2c6c2 0 18%,transparent 19%) 0 0/36px 36px,#fbe9e7"></div><div class="info"><h3>Algodón infantil</h3><p>Punto · 100% algodón</p></div></article>
+    <article class="product"><div class="swatch" style="background:repeating-linear-gradient(0deg,#5b4a3f 0 3px,#6b584b 3px 6px)"></div><div class="info"><h3>Gabardina</h3><p>Tejido plano · mezcla</p></div></article>
+  </section>
+  </main>
+
+  <aside class="panel" id="panel" aria-label="Diagnóstico del widget">
+    <div class="head" id="panelHead" role="button" tabindex="0" aria-expanded="true">
+      <strong>Prueba del widget</strong><span id="summary" class="check-detail">—</span>
+    </div>
+    <div class="body">
+      <form id="form" class="body" style="padding:0">
+        <label>Clave pública del chatbot (data-bot)
+          <input id="bot" name="bot" placeholder="bot_…" pattern="bot_[0-9a-f]{32}" required autocomplete="off" />
+        </label>
+        <label>URL de la app web (donde está widget.js)
+          <input id="app" name="app" type="url" required />
+        </label>
+        <div class="row">
+          <label>URL de la API (para el diagnóstico)
+            <input id="api" name="api" type="url" required />
+          </label>
+          <label>Posición
+            <select id="pos" name="pos"><option value="right">Derecha</option><option value="left">Izquierda</option></select>
+          </label>
+        </div>
+        <button class="primary" type="submit">Cargar widget</button>
+      </form>
+
+      <div>
+        <p class="check-detail" style="margin:0 0 4px">Dominio de esta página (agrégalo en <em>Dominios autorizados</em>):</p>
+        <div class="origin"><code id="origin"></code><button class="link" type="button" id="copyOrigin">Copiar</button></div>
+      </div>
+
+      <ol class="checks" id="checks"></ol>
+
+      <div>
+        <p class="check-detail" style="margin:0 0 4px">Código insertado en esta página:</p>
+        <pre class="snippet" id="snippet">—</pre>
+      </div>
+      <div class="log" id="log" aria-live="polite"></div>
+    </div>
+  </aside>
+
+  <script>
+  (function () {
+    var DEFAULTS = {
+      app: 'https://rag-empresas-web.vercel.app',
+      api: 'https://rag-empresas-api.vercel.app',
+      pos: 'right',
+    };
+    var params = new URLSearchParams(location.search);
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('widget-demo') || '{}'); } catch (e) {}
+    var cfg = {
+      bot: params.get('bot') || saved.bot || '',
+      app: (params.get('app') || saved.app || DEFAULTS.app).replace(/\/$/, ''),
+      api: (params.get('api') || saved.api || DEFAULTS.api).replace(/\/$/, ''),
+      pos: params.get('pos') === 'left' ? 'left' : (params.get('pos') || saved.pos || DEFAULTS.pos),
+    };
+
+    var $ = function (id) { return document.getElementById(id); };
+    $('bot').value = cfg.bot; $('app').value = cfg.app; $('api').value = cfg.api; $('pos').value = cfg.pos;
+    $('origin').textContent = location.origin;
+    // El panel no tapa el botón del widget: va al lado contrario.
+    if (cfg.pos === 'left') { $('panel').style.left = 'auto'; $('panel').style.right = '20px'; }
+    document.body.classList.add(cfg.pos === 'left' ? 'panel-right' : 'panel-left');
+
+    $('copyOrigin').addEventListener('click', function () {
+      navigator.clipboard && navigator.clipboard.writeText(location.origin).then(function () { $('copyOrigin').textContent = 'Copiado'; });
+    });
+    function togglePanel() {
+      var collapsed = $('panel').classList.toggle('collapsed');
+      $('panelHead').setAttribute('aria-expanded', String(!collapsed));
+    }
+    $('panelHead').addEventListener('click', togglePanel);
+    $('panelHead').addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePanel(); } });
+
+    // Al cambiar la configuración se recarga la página: widget.js se instala una sola vez por página.
+    $('form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var next = { bot: $('bot').value.trim(), app: $('app').value.trim(), api: $('api').value.trim(), pos: $('pos').value };
+      try { localStorage.setItem('widget-demo', JSON.stringify(next)); } catch (err) {}
+      location.search = new URLSearchParams(next).toString();
+    });
+
+    function log(text) {
+      var line = document.createElement('div');
+      line.textContent = new Date().toLocaleTimeString() + '  ' + text;
+      $('log').appendChild(line);
+      $('log').scrollTop = $('log').scrollHeight;
+    }
+
+    var STEPS = [
+      ['script', 'Script widget.js', 'Se descarga desde la app web.'],
+      ['config', 'Configuración del chatbot', 'La API responde la configuración pública (widget activo).'],
+      ['button', 'Botón en la página', 'widget.js inserta el botón flotante y el iframe.'],
+      ['frame', 'Chat dentro del iframe', 'El iframe carga el chat y avisa que está listo.'],
+    ];
+    var state = {};
+    function render() {
+      var list = $('checks');
+      list.innerHTML = '';
+      var ok = 0;
+      STEPS.forEach(function (s) {
+        var st = state[s[0]] || { status: 'idle', detail: s[2] };
+        if (st.status === 'ok') ok++;
+        var li = document.createElement('li');
+        li.className = st.status;
+        var icon = { ok: '✓', bad: '✕', warn: '!', wait: '…', idle: '' }[st.status];
+        li.innerHTML = '<span class="icon" aria-hidden="true"></span><div><div class="check-title"></div><div class="check-detail"></div></div>';
+        li.querySelector('.icon').textContent = icon;
+        li.querySelector('.check-title').textContent = s[1];
+        li.querySelector('.check-detail').textContent = st.detail;
+        list.appendChild(li);
+      });
+      $('summary').textContent = cfg.bot ? ok + ' de ' + STEPS.length + ' pasos correctos' : 'Falta la clave del chatbot';
+    }
+    function set(step, status, detail) { state[step] = { status: status, detail: detail }; render(); log(step + ': ' + detail); }
+    render();
+
+    if (!cfg.bot) {
+      set('script', 'warn', 'Escribe la clave pública del chatbot (Asistente y widget → Código para tu sitio) y pulsa «Cargar widget».');
+      return;
+    }
+
+    var snippet = '<script src="' + cfg.app + '/widget.js" data-bot="' + cfg.bot + '"' + (cfg.pos === 'left' ? ' data-position="left"' : '') + ' async><\/script>';
+    $('snippet').textContent = snippet;
+
+    // 2) Configuración pública (la misma petición que hace widget.js desde este dominio).
+    set('config', 'wait', 'Consultando ' + cfg.api + '/widget/…/config');
+    fetch(cfg.api + '/widget/' + encodeURIComponent(cfg.bot) + '/config').then(function (r) {
+      if (r.status === 404) throw new Error('El chatbot no existe o el widget está desactivado. Actívalo en «Asistente y widget».');
+      if (!r.ok) throw new Error('La API respondió ' + r.status + '.');
+      return r.json();
+    }).then(function (c) {
+      set('config', 'ok', 'Activo: «' + c.name + '»' + (c.showSources ? ' · muestra fuentes' : '') + '.');
+    }).catch(function (e) {
+      var msg = e instanceof TypeError
+        ? 'El navegador bloqueó la petición (CORS o red). La API debe permitir la configuración pública desde cualquier dominio.'
+        : e.message;
+      set('config', 'bad', msg);
+    });
+
+    // 3) Botón e iframe insertados por widget.js.
+    var embedPrefix = cfg.app + '/embed/';
+    var observer = new MutationObserver(function () {
+      var frame = document.querySelector('iframe[src^="' + embedPrefix + '"]');
+      if (frame && (!state.button || state.button.status !== 'ok')) {
+        set('button', 'ok', 'Insertado (esquina ' + (cfg.pos === 'left' ? 'izquierda' : 'derecha') + '). Haz clic en él para abrir el chat.');
+        set('frame', 'wait', 'Cargando el chat en el iframe…');
+        frameTimer = setTimeout(function () {
+          if (state.frame && state.frame.status === 'wait') {
+            set('frame', 'bad', 'El chat no cargó. Lo más común: este dominio (' + location.origin +
+              ') no está en «Dominios autorizados» y el navegador bloquea el iframe (Content-Security-Policy: frame-ancestors). ' +
+              'Agrégalo, guarda, espera ~1 minuto y recarga.');
+          }
+        }, 12000);
+      }
+    });
+    var frameTimer = null;
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // 4) El chat del iframe avisa cuando está listo.
+    window.addEventListener('message', function (e) {
+      if (e.origin !== cfg.app || !e.data || typeof e.data !== 'object') return;
+      if (e.data.type === 'rag-widget-ready') {
+        clearTimeout(frameTimer);
+        set('frame', 'ok', 'Listo: «' + e.data.name + '». Escribe una pregunta en el chat.');
+      } else if (e.data.type === 'rag-widget-unavailable') {
+        clearTimeout(frameTimer);
+        set('frame', 'bad', 'El iframe cargó pero el chatbot no está disponible (widget desactivado o clave rotada).');
+      }
+    });
+
+    // 1) Script widget.js
+    set('script', 'wait', 'Descargando ' + cfg.app + '/widget.js');
+    var s = document.createElement('script');
+    s.src = cfg.app + '/widget.js';
+    s.async = true;
+    s.setAttribute('data-bot', cfg.bot);
+    if (cfg.pos === 'left') s.setAttribute('data-position', 'left');
+    s.onload = function () {
+      set('script', 'ok', 'Descargado.');
+      setTimeout(function () {
+        if (!state.button) set('button', 'bad', 'widget.js no insertó el botón: suele pasar cuando la configuración del chatbot falla (ver paso 2) o la clave no es válida.');
+      }, 8000);
+    };
+    s.onerror = function () { set('script', 'bad', 'No se pudo descargar widget.js. Revisa la URL de la app web.'); };
+    document.body.appendChild(s);
+  })();
+  </script>
+</body>
+</html>

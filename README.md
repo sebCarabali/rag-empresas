@@ -53,6 +53,10 @@ Cada proyecto tiene su asistente (`chatbots`), configurable en **Proyecto → As
   - El widget es público: actívalo solo en proyectos con información para clientes.
 - La clave pública se puede regenerar; la anterior deja de funcionar.
 
+### Página de prueba del widget
+
+`apps/widget-demo` es un sitio estático (proyecto de Vercel `rag-empresas-widget-demo`, sin build) que simula la web de una tienda ficticia en otro dominio. Se abre con `?bot=<clave pública>` y muestra un diagnóstico paso a paso: descarga de `widget.js`, configuración pública del chatbot, botón insertado y chat cargado en el iframe. Para que el chat se vea hay que activar el widget y agregar el dominio de la página en *Dominios autorizados*.
+
 ### Clave de Gemini por empresa
 
 En **Configuración de la empresa** (owner/admin) cada empresa puede cargar su propia clave de Gemini. Así el chat y las descripciones web de sus proyectos usan su cuenta y su cuota.
@@ -111,6 +115,7 @@ apps/
     api/queues/        función consumidora de la cola
     src/               código Nest (se compila a dist/)
   web/                 Next.js (proyecto Vercel "web")
+  widget-demo/         sitio estático de prueba del widget (proyecto Vercel aparte)
 supabase/migrations/   esquema, RLS, storage y búsqueda híbrida
 .github/workflows/     CI y migraciones
 ```
