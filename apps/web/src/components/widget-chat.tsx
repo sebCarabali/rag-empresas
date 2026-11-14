@@ -3,6 +3,7 @@
 import { useParams } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { widgetApi } from '@/lib/api';
+import { FeedbackButtons } from './feedback-buttons';
 
 type WidgetConfig = Awaited<ReturnType<typeof widgetApi.config>>;
 
@@ -11,6 +12,22 @@ interface Turn {
   content: string;
   sources?: Array<{ index: number; documentName: string; page?: number }>;
   streaming?: boolean;
+  /** Id del registro en el servidor, para valorar la respuesta. */
+  messageId?: string | null;
+  sessionId?: string;
+}
+
+/** Sesión anónima del visitante: agrupa sus preguntas y le permite valorar sus respuestas. */
+function visitorSession(): string {
+  try {
+    const saved = sessionStorage.getItem('rag-widget-session');
+    if (saved) return saved;
+    const id = crypto.randomUUID();
+    sessionStorage.setItem('rag-widget-session', id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 
 /** Chat que se muestra dentro del iframe del widget, en el sitio de la empresa. */
@@ -24,6 +41,7 @@ export function WidgetChat() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const sessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     widgetApi.config(publicKey).then(setConfig, () => setUnavailable(true));
@@ -48,15 +66,18 @@ export function WidgetChat() {
       setTurns((list) => list.map((t, i) => (i === list.length - 1 ? fn(t) : t)));
 
     abortRef.current = new AbortController();
+    sessionRef.current ??= visitorSession();
     try {
       await widgetApi.ask(
         publicKey,
         question,
         history,
+        sessionRef.current,
         (event) => {
           if (event.type === 'delta') update((t) => ({ ...t, content: t.content + event.text }));
           else if (event.type === 'reset') update((t) => ({ ...t, content: '' }));
           else if (event.type === 'sources') update((t) => ({ ...t, sources: event.sources }));
+          else if (event.type === 'done') update((t) => ({ ...t, messageId: event.messageId ?? null, sessionId: event.sessionId }));
           else if (event.type === 'error') setError(event.message);
         },
         abortRef.current.signal,
@@ -132,6 +153,14 @@ export function WidgetChat() {
                 <p className="mt-2 text-[11px] text-slate-500">
                   Fuentes: {t.sources.map((s) => `[${s.index}] ${s.documentName}${s.page ? ` p.${s.page}` : ''}`).join(' · ')}
                 </p>
+              )}
+              {t.role === 'assistant' && !t.streaming && t.messageId && t.sessionId && (
+                <FeedbackButtons
+                  color={color}
+                  onRate={(rating, comment) =>
+                    widgetApi.rate(publicKey, t.messageId!, t.sessionId!, rating, comment)
+                  }
+                />
               )}
             </div>
           </div>

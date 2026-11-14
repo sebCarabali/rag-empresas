@@ -83,8 +83,71 @@ export interface Message {
   sources: Source[];
   tool_calls?: ToolCall[];
   model_info?: ModelInfo | null;
+  feedback?: Feedback | null;
   created_at: string;
 }
+
+export interface Feedback {
+  rating: -1 | 1;
+  comment: string | null;
+}
+
+/** Valoración del chat interno, con la pregunta que la originó. */
+export interface FeedbackItem extends Feedback {
+  message_id: string;
+  question: string | null;
+  answer: string | null;
+  model_info: ModelInfo | null;
+  updated_at: string;
+}
+
+/** Pregunta de un visitante del sitio web (widget). */
+export interface WidgetMessage {
+  id: string;
+  session_id: string;
+  question: string;
+  answer: string;
+  model_info: ModelInfo | null;
+  cached: boolean;
+  rating: -1 | 1 | null;
+  feedback_comment: string | null;
+  created_at: string;
+}
+
+export interface EvalCase {
+  id: string;
+  question: string;
+  must_include: string[];
+  must_not_include: string[];
+  notes: string | null;
+  created_at: string;
+}
+
+export interface EvalRun {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  total: number;
+  passed: number;
+  failed: number;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface EvalResult {
+  id: string;
+  case_id: string | null;
+  question: string;
+  answer: string;
+  passed: boolean;
+  missing: string[];
+  forbidden: string[];
+  model_info: ModelInfo | null;
+  duration_ms: number | null;
+  error: string | null;
+}
+
+export type EvalCaseInput = Pick<EvalCase, 'question' | 'must_include' | 'must_not_include'> & { notes?: string };
 
 export interface Chatbot {
   id?: string;
@@ -141,6 +204,28 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  rateMessage: (messageId: string, rating: -1 | 1, comment?: string) =>
+    request<Feedback>('PUT', `/messages/${messageId}/feedback`, { rating, comment }),
+  unrateMessage: (messageId: string) => request<void>('DELETE', `/messages/${messageId}/feedback`),
+  feedback: (projectId: string, rating: 'all' | 'up' | 'down' = 'all') =>
+    request<FeedbackItem[]>('GET', `/projects/${projectId}/feedback?rating=${rating}`),
+  widgetMessages: (projectId: string, rating: 'all' | 'up' | 'down' = 'all', before?: string) =>
+    request<WidgetMessage[]>(
+      'GET',
+      `/projects/${projectId}/widget-messages?rating=${rating}${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+    ),
+  evalCases: (projectId: string) => request<EvalCase[]>('GET', `/projects/${projectId}/evals/cases`),
+  createEvalCase: (projectId: string, input: EvalCaseInput) =>
+    request<EvalCase>('POST', `/projects/${projectId}/evals/cases`, input),
+  updateEvalCase: (projectId: string, caseId: string, input: EvalCaseInput) =>
+    request<EvalCase>('PUT', `/projects/${projectId}/evals/cases/${caseId}`, input),
+  deleteEvalCase: (projectId: string, caseId: string) =>
+    request<void>('DELETE', `/projects/${projectId}/evals/cases/${caseId}`),
+  evalRuns: (projectId: string) => request<EvalRun[]>('GET', `/projects/${projectId}/evals/runs`),
+  startEvalRun: (projectId: string) => request<EvalRun>('POST', `/projects/${projectId}/evals/runs`),
+  evalRun: (projectId: string, runId: string) =>
+    request<EvalRun & { results: EvalResult[] }>('GET', `/projects/${projectId}/evals/runs/${runId}`),
+
   me: () => request<{ user: { id: string; email?: string }; companies: Company[] }>('GET', '/me'),
   createCompany: (name: string) => request<Company>('POST', '/companies', { name }),
 
@@ -161,12 +246,12 @@ export const api = {
       upload: { path: string; token: string };
     }>('POST', `/projects/${projectId}/documents`, {
       fileName: file.name,
-      mimeType: file.type || guessMime(file.name),
+      mimeType: guessMime(file.name),
       sizeBytes: file.size,
     });
     const { error } = await getSupabase()
       .storage.from('documents')
-      .uploadToSignedUrl(upload.path, upload.token, file, { contentType: file.type || guessMime(file.name) });
+      .uploadToSignedUrl(upload.path, upload.token, file, { contentType: guessMime(file.name) });
     if (error) {
       await api.deleteDocument(document.id).catch(() => undefined);
       throw new ApiError(`No se pudo subir el archivo: ${error.message}`, 400);
@@ -284,13 +369,14 @@ export const widgetApi = {
     publicKey: string,
     content: string,
     history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    sessionId: string,
     onEvent: (event: StreamEvent) => void,
     signal?: AbortSignal,
   ) => {
     const res = await fetch(`${API_URL}/widget/${publicKey}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, history }),
+      body: JSON.stringify({ content, history, sessionId }),
       signal,
     });
     if (!res.ok) {
@@ -300,22 +386,36 @@ export const widgetApi = {
     }
     await readNdjson(res, onEvent);
   },
+  rate: async (publicKey: string, messageId: string, sessionId: string, rating: -1 | 1, comment?: string) => {
+    const res = await fetch(`${API_URL}/widget/${publicKey}/messages/${messageId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, rating, comment }),
+    });
+    if (!res.ok) throw new ApiError('No se pudo guardar la valoración', res.status);
+  },
 };
 
-export const ACCEPTED_FILES = '.pdf,.docx,.txt,.md,.csv';
+export const ACCEPTED_FILES = '.pdf,.docx,.xlsx,.txt,.md,.csv,.png,.jpg,.jpeg,.webp';
 
+const MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  md: 'text/markdown',
+  csv: 'text/csv',
+  txt: 'text/plain',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+};
+
+/**
+ * Tipo del archivo por su extensión. Se prefiere a file.type porque los
+ * navegadores no coinciden (Windows reporta los CSV como application/vnd.ms-excel).
+ */
 function guessMime(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase();
-  switch (ext) {
-    case 'pdf':
-      return 'application/pdf';
-    case 'docx':
-      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    case 'md':
-      return 'text/markdown';
-    case 'csv':
-      return 'text/csv';
-    default:
-      return 'text/plain';
-  }
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  return MIME_BY_EXTENSION[ext] ?? 'text/plain';
 }

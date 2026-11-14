@@ -12,7 +12,9 @@ import {
   Res,
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, Length, MaxLength, ValidateNested } from 'class-validator';
+import { ParseUUIDPipe } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, MaxLength, ValidateNested } from 'class-validator';
 import type { Request, Response } from 'express';
 import { Public } from '../auth/auth.guard';
 import { ChatEngineService } from '../chat/chat-engine.service';
@@ -41,6 +43,25 @@ class WidgetMessageDto {
   @ValidateNested({ each: true })
   @Type(() => HistoryTurn)
   history?: HistoryTurn[];
+
+  /** Sesión del visitante (aleatoria, la genera el navegador) para agrupar sus preguntas. */
+  @IsOptional()
+  @IsUUID()
+  sessionId?: string;
+}
+
+class WidgetFeedbackDto {
+  @IsUUID()
+  sessionId: string;
+
+  @IsInt()
+  @IsIn([-1, 1])
+  rating: -1 | 1;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  comment?: string;
 }
 
 /** Mensajes por minuto que puede enviar un mismo visitante (IP) por instancia. */
@@ -127,18 +148,36 @@ export class WidgetController {
       if (!res.writableEnded) abort.abort();
     });
 
+    const sessionId = dto.sessionId ?? randomUUID();
+    const question = dto.content.trim();
     try {
       const result = await this.engine.ask({
         db,
         projectId: bot.project_id,
         companyId: bot.company_id,
-        question: dto.content.trim(),
+        question,
         history: (dto.history ?? []) as ChatTurn[],
         bot: this.chatbots.profile(bot, 'public'),
         emit,
         signal: abort.signal,
       });
-      emit({ type: 'done', cached: result.cached });
+      // Registro para que la empresa vea lo que preguntan sus visitantes.
+      const { data: logged, error: logError } = await db
+        .from('widget_messages')
+        .insert({
+          chatbot_id: bot.id,
+          company_id: bot.company_id,
+          project_id: bot.project_id,
+          session_id: sessionId,
+          question,
+          answer: result.answer,
+          model_info: result.modelInfo,
+          cached: result.cached,
+        })
+        .select('id')
+        .single();
+      if (logError) this.logger.warn(`Widget ${bot.id}: no se registró el mensaje: ${logError.message}`);
+      emit({ type: 'done', cached: result.cached, messageId: logged?.id ?? null, sessionId });
     } catch (err) {
       if (!abort.signal.aborted) {
         this.logger.error(`Widget ${bot.id}: ${(err as Error).message}`);
@@ -147,5 +186,28 @@ export class WidgetController {
     } finally {
       res.end();
     }
+  }
+
+  /** 👍/👎 del visitante. Solo puede valorar respuestas de su propia sesión. */
+  @Post(':publicKey/messages/:messageId/feedback')
+  async feedback(
+    @Param('publicKey') publicKey: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: WidgetFeedbackDto,
+  ) {
+    const db = this.supabase.admin;
+    const bot = await this.chatbots.findByPublicKey(db, publicKey);
+    if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
+    const { data, error } = await db
+      .from('widget_messages')
+      .update({ rating: dto.rating, feedback_comment: dto.comment?.trim() || null, feedback_at: new Date().toISOString() })
+      .eq('id', messageId)
+      .eq('chatbot_id', bot.id)
+      .eq('session_id', dto.sessionId)
+      .select('id, rating')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new NotFoundException('Mensaje no encontrado');
+    return data;
   }
 }

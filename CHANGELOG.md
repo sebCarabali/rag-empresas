@@ -2,6 +2,21 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.10.0] - 2026-11-14
+
+### Agregado
+
+- 👍/👎 con comentario opcional en las respuestas del chat de la app y del widget.
+- Registro de las preguntas de los visitantes del widget (`widget_messages`), con su valoración, visible para owner/admin/editor.
+- Página **Calidad** por proyecto: valoraciones del equipo, preguntas del sitio web y pruebas automáticas.
+- Pruebas automáticas de calidad: preguntas con textos esperados y prohibidos; se ejecutan en la cola, sin caché, y muestran qué faltó en cada respuesta.
+- OCR con Gemini para PDF escaneados e imágenes (PNG, JPG, WebP), con la transcripción guardada para no repetir el costo.
+- Soporte para Excel (`.xlsx`): cada hoja se procesa como un CSV (fragmentos por fila, catálogo y descripciones web).
+
+### Corregido
+
+- El tipo de archivo se detecta por la extensión: Windows reporta los CSV como `application/vnd.ms-excel` y se rechazaban.
+
 ## [0.9.0] - 2026-11-14
 
 ### Cambiado

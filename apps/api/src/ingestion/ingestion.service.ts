@@ -3,8 +3,11 @@ import { AppConfig } from '../config/app-config';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { chunkSections, type Chunk } from './chunker';
-import { csvToCatalogItems, csvToChunks } from './csv-catalog';
-import { extractText, UnsupportedFileError } from './text-extractor';
+import { csvToCatalogItems, csvToChunks, type CatalogItem } from './csv-catalog';
+import { OcrService } from './ocr.service';
+import { spreadsheetToTable, XLSX_MIME } from './spreadsheet';
+import { extractText, TABULAR_MIME_TYPES, UnsupportedFileError, type TextSection } from './text-extractor';
+import { CompanyKeysService } from '../companies/company-keys.service';
 
 export interface IngestionJob {
   documentId: string;
@@ -22,6 +25,9 @@ export interface IngestionResult {
 /** Errores que no se arreglan reintentando: el documento se marca como fallido de inmediato. */
 export class PermanentIngestionError extends Error {}
 
+/** Error transitorio del OCR: el trabajo se reintenta. */
+export class OcrFailedError extends Error {}
+
 const EMBED_BATCH_SIZE = 16;
 const CATALOG_INSERT_BATCH = 500;
 /** Margen bajo el límite de 300 s de Vercel (Hobby) para guardar y encolar el siguiente lote. */
@@ -35,6 +41,8 @@ export class IngestionService {
     private readonly supabase: SupabaseService,
     private readonly embeddings: EmbeddingsService,
     private readonly config: AppConfig,
+    private readonly ocr: OcrService,
+    private readonly keys: CompanyKeysService,
   ) {}
 
   /**
@@ -73,25 +81,34 @@ export class IngestionService {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     let chunks: Chunk[];
+    let catalogItems: CatalogItem[] = [];
     try {
-      // Los CSV se procesan por filas (un fragmento por producto); el resto, por texto.
-      chunks =
-        doc.mime_type === 'text/csv'
-          ? csvToChunks(buffer)
-          : chunkSections(await extractText(buffer, doc.mime_type));
+      if (doc.mime_type === 'text/csv') {
+        // Tablas: un fragmento por producto + catálogo estructurado.
+        chunks = csvToChunks(buffer);
+        catalogItems = csvToCatalogItems(buffer);
+      } else if (doc.mime_type === XLSX_MIME) {
+        ({ chunks, items: catalogItems } = await spreadsheetToTable(buffer));
+      } else {
+        // OCR con la clave de Gemini de la empresa (PDF escaneados e imágenes).
+        const ocr = (b: Buffer, mime: string) => this.cachedOcr(doc, b, mime);
+        chunks = chunkSections(await extractText(buffer, doc.mime_type, ocr));
+      }
     } catch (err) {
       if (err instanceof UnsupportedFileError) throw new PermanentIngestionError(err.message);
+      // Un fallo de OCR (Gemini caído, cuota) se reintenta desde la cola.
+      if (err instanceof OcrFailedError) throw err;
       throw new PermanentIngestionError(`No se pudo leer el archivo: ${(err as Error).message}`);
     }
 
     // Catálogo estructurado (filtros exactos y conteos): se reemplaza al iniciar el documento.
-    if (job.startChunk === 0 && doc.mime_type === 'text/csv') {
-      await this.replaceCatalog(doc, csvToCatalogItems(buffer));
+    if (job.startChunk === 0 && TABULAR_MIME_TYPES.has(doc.mime_type)) {
+      await this.replaceCatalog(doc, catalogItems);
     }
 
     if (chunks.length === 0) {
       throw new PermanentIngestionError(
-        'No se encontró texto en el archivo. Si es un PDF escaneado, necesita OCR.',
+        'No se encontró texto en el archivo (ni con OCR). Revisa que no esté vacío o protegido.',
       );
     }
 
@@ -123,12 +140,44 @@ export class IngestionService {
 
     await this.updateDocument(doc.id, { status: 'ready', chunk_count: chunks.length, error: null });
     this.logger.log(`Documento ${doc.id} listo: ${chunks.length} chunks en ${Date.now() - started} ms`);
-    return doc.mime_type === 'text/csv' ? { enrichProjectId: doc.project_id } : {};
+    return TABULAR_MIME_TYPES.has(doc.mime_type) ? { enrichProjectId: doc.project_id } : {};
+  }
+
+  /**
+   * OCR con la clave de Gemini de la empresa. La transcripción se guarda junto al archivo
+   * para que los lotes siguientes (y los reprocesos) no vuelvan a pagar el OCR.
+   */
+  private async cachedOcr(
+    doc: { company_id: string; storage_path: string },
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<TextSection[]> {
+    const storage = this.supabase.admin.storage.from(this.config.storageBucket);
+    const cachePath = `${doc.storage_path}.ocr.json`;
+    const { data: cached } = await storage.download(cachePath);
+    if (cached) {
+      try {
+        return JSON.parse(await cached.text()) as TextSection[];
+      } catch {
+        // caché corrupta: se vuelve a transcribir
+      }
+    }
+    let sections: TextSection[];
+    try {
+      const companyKey = await this.keys.getGeminiKey(doc.company_id);
+      sections = await this.ocr.transcribe(buffer, mimeType, companyKey);
+    } catch (err) {
+      throw new OcrFailedError(`OCR con Gemini falló: ${(err as Error).message}`);
+    }
+    await storage
+      .upload(cachePath, JSON.stringify(sections), { contentType: 'application/json', upsert: true })
+      .catch(() => undefined);
+    return sections;
   }
 
   private async replaceCatalog(
     doc: { id: string; company_id: string; project_id: string },
-    items: ReturnType<typeof csvToCatalogItems>,
+    items: CatalogItem[],
   ): Promise<void> {
     const db = this.supabase.admin;
     const { error: delError } = await db.from('catalog_items').delete().eq('document_id', doc.id);

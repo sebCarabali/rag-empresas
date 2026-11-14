@@ -97,7 +97,7 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
           onChange={(e) => void onFiles(e.target.files)}
         />
       </div>
-      <p className="text-xs text-slate-500">PDF, Word (.docx), TXT, Markdown o CSV · máximo 50 MB.</p>
+      <p className="text-xs text-slate-500">PDF (también escaneados), Word, Excel (.xlsx), CSV, TXT, Markdown o imágenes (PNG, JPG, WebP) · máximo 50 MB. Los escaneos e imágenes se leen con OCR de Gemini.</p>
       <ErrorText>{error}</ErrorText>
 
       <ul className="flex-1 space-y-2 overflow-y-auto">

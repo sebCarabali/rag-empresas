@@ -36,6 +36,8 @@ export interface AskInput {
   bot: BotProfile | null;
   emit: Emit;
   signal: AbortSignal;
+  /** false: ni lee ni escribe la caché (pruebas de calidad). Por defecto true. */
+  useCache?: boolean;
 }
 
 export interface AskResult {
@@ -67,7 +69,7 @@ export class ChatEngineService {
     // 1) Caché: cualquier pregunta que se entienda sola (no las de seguimiento).
     let cacheKey: string | null = null;
     let provisional: CachedAnswer | null = null;
-    if (this.cache.enabled && !AnswerCacheService.isFollowUp(question, history.length > 0)) {
+    if (input.useCache !== false && this.cache.enabled && !AnswerCacheService.isFollowUp(question, history.length > 0)) {
       const version = await this.cache.contentVersion(db, projectId);
       cacheKey = this.cache.key(projectId, version, question, botVariant(bot));
       const hit = await this.cache.get(cacheKey);

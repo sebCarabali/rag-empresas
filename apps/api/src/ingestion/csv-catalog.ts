@@ -15,7 +15,7 @@ export interface CsvChunkOptions {
   maxCodesPerChunk?: number;
 }
 
-type Row = string[];
+export type Row = string[];
 
 /* ------------------------------------------------------------------ */
 /* Lectura                                                              */
@@ -370,8 +370,9 @@ function toChunk(rec: ProductRecord): Chunk {
   };
 }
 
-function readRecords(buffer: Buffer): ProductRecord[] {
-  const rows = parseDelimited(decodeCsv(buffer));
+/** Filas de una tabla (CSV o una hoja de Excel) → productos. */
+function rowsToRecords(input: Row[]): ProductRecord[] {
+  const rows = input.filter((r) => r.some((c) => clean(c) !== ''));
   if (rows.length === 0) return [];
   const wooHeader = rows.findIndex(isWooHeader);
   const records =
@@ -381,16 +382,12 @@ function readRecords(buffer: Buffer): ProductRecord[] {
   return records.filter((r) => r.lines.length > 0);
 }
 
-export function csvToChunks(buffer: Buffer, options: CsvChunkOptions = {}): Chunk[] {
-  return groupVariants(readRecords(buffer), options.maxCodesPerChunk ?? 40).map(toChunk);
+function readRecords(buffer: Buffer): ProductRecord[] {
+  return rowsToRecords(parseDelimited(decodeCsv(buffer)));
 }
 
-/**
- * Productos para la tabla del catálogo: uno por fila (sin agrupar), para que
- * conteos y filtros sean exactos. Vacío si el CSV no tiene encabezado.
- */
-export function csvToCatalogItems(buffer: Buffer): CatalogItem[] {
-  return readRecords(buffer)
+function recordsToCatalogItems(records: ProductRecord[]): CatalogItem[] {
+  return records
     .filter((r) => Object.keys(r.attrs).length > 0)
     .map((r) => {
       const code = r.codes[0] ?? null;
@@ -402,4 +399,28 @@ export function csvToCatalogItems(buffer: Buffer): CatalogItem[] {
       }
       return { row: r.row, name: r.title, code, attributes, numbers, image: r.images[0] ?? null };
     });
+}
+
+export function csvToChunks(buffer: Buffer, options: CsvChunkOptions = {}): Chunk[] {
+  return groupVariants(readRecords(buffer), options.maxCodesPerChunk ?? 40).map(toChunk);
+}
+
+/**
+ * Productos para la tabla del catálogo: uno por fila (sin agrupar), para que
+ * conteos y filtros sean exactos. Vacío si el CSV no tiene encabezado.
+ */
+export function csvToCatalogItems(buffer: Buffer): CatalogItem[] {
+  return recordsToCatalogItems(readRecords(buffer));
+}
+
+/** Tabla ya leída (p. ej. una hoja de Excel): fragmentos para el chat. */
+export function tableToChunks(rows: Row[], extraMetadata: Record<string, unknown> = {}, options: CsvChunkOptions = {}): Chunk[] {
+  return groupVariants(rowsToRecords(rows), options.maxCodesPerChunk ?? 40)
+    .map(toChunk)
+    .map((c) => ({ ...c, metadata: { ...c.metadata, ...extraMetadata } }));
+}
+
+/** Tabla ya leída: productos para el catálogo estructurado. */
+export function tableToCatalogItems(rows: Row[]): CatalogItem[] {
+  return recordsToCatalogItems(rowsToRecords(rows));
 }
