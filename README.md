@@ -124,4 +124,6 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 - Los PDF escaneados (imágenes) no tienen texto: necesitan OCR, que no está incluido.
 - Formatos soportados: PDF, DOCX, TXT, Markdown y CSV.
+- Los CSV se procesan por filas: un fragmento por producto con texto limpio («Columna: valor»). Las exportaciones de WooCommerce se reconocen solas (atributos en pares nombre/valor, aunque el encabezado no esté en la primera fila), las variantes con los mismos atributos se agrupan y las composiciones abreviadas se expanden (Pol → Poliéster, Alg → Algodón…).
+- El chat responde bien preguntas puntuales sobre un catálogo, pero no conteos ni listados completos, porque solo lee los fragmentos más relevantes.
 - Si cambias el modelo de embeddings por uno con otra dimensión, hay que ajustar `vector(384)` en la migración y reprocesar todos los documentos.
