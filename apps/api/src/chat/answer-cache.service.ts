@@ -4,12 +4,14 @@ import { createHash } from 'node:crypto';
 import { AppConfig } from '../config/app-config';
 import { SupabaseService } from '../supabase/supabase.service';
 import type { CatalogToolCall } from './catalog-tools';
+import type { ModelInfo } from './llm.service';
 import type { Source } from './prompt';
 
 export interface CachedAnswer {
   answer: string;
   sources: Source[];
   toolCalls: CatalogToolCall[];
+  modelInfo?: ModelInfo | null;
 }
 
 /** Sube si cambia el prompt, el formato de las fuentes o la lógica de búsqueda. */
@@ -96,7 +98,7 @@ export class AnswerCacheService {
   async get(key: string): Promise<CachedAnswer | null> {
     const { data, error } = await this.supabase.admin
       .from('answer_cache')
-      .select('answer, sources, tool_calls, hits')
+      .select('answer, sources, tool_calls, model_info, hits')
       .eq('cache_key', key)
       .gt('expires_at', new Date().toISOString())
       .maybeSingle();
@@ -111,7 +113,12 @@ export class AnswerCacheService {
       .update({ hits: (data.hits ?? 0) + 1 })
       .eq('cache_key', key)
       .then(({ error: e }) => e && this.logger.warn(`No se pudo contar el acierto: ${e.message}`));
-    return { answer: data.answer, sources: data.sources ?? [], toolCalls: data.tool_calls ?? [] };
+    return {
+      answer: data.answer,
+      sources: data.sources ?? [],
+      toolCalls: data.tool_calls ?? [],
+      modelInfo: data.model_info ?? null,
+    };
   }
 
   async put(key: string, projectId: string, question: string, value: CachedAnswer): Promise<void> {
@@ -123,6 +130,7 @@ export class AnswerCacheService {
       answer: value.answer,
       sources: value.sources,
       tool_calls: value.toolCalls,
+      model_info: value.modelInfo ?? null,
       hits: 0,
       created_at: new Date().toISOString(),
       expires_at: expires.toISOString(),

@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.6.0] - 2026-11-14
+
+### Agregado
+
+- Modelo de respaldo en Groq (`openai/gpt-oss-120b` por defecto): si Gemini falla o no responde en 25 s, la pregunta se responde con Groq usando el mismo contexto y las herramientas del catálogo.
+- El chat muestra qué modelo respondió cada mensaje y, cuando hay cambio, el aviso con el motivo.
+
 ## [0.5.0] - 2026-11-14
 
 ### Cambiado
