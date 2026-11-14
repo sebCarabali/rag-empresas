@@ -2,6 +2,14 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.1.2] - 2026-11-14
+
+### Corregido
+
+- Al encolar un documento, la verificación en Storage usaba `exists()`, que devolvía falso aunque el archivo existiera. Ahora usa `list()` y registra el error real.
+- La API valida al arrancar que `SUPABASE_SERVICE_ROLE_KEY` sea una clave secreta (y no la pública) y muestra un mensaje claro si no lo es.
+- Los fallos al borrar archivos de Storage quedan registrados en los logs.
+
 ## [0.1.1] - 2026-11-14
 
 ### Seguridad

@@ -7,6 +7,8 @@ import {
   ForbiddenException,
   Get,
   HttpCode,
+  InternalServerErrorException,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
@@ -52,6 +54,8 @@ function safeFileName(name: string): string {
 
 @Controller()
 export class DocumentsController {
+  private readonly logger = new Logger(DocumentsController.name);
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
@@ -140,11 +144,19 @@ export class DocumentsController {
       throw new ConflictException('El documento ya se está procesando');
     }
 
-    // Verificar que el archivo realmente se subió.
-    const { data: exists, error: existsError } = await this.supabase.admin.storage
+    // Verificar que el archivo realmente se subió (list es más fiable que exists/HEAD).
+    const slash = doc.storage_path.lastIndexOf('/');
+    const folder = doc.storage_path.slice(0, slash);
+    const fileName = doc.storage_path.slice(slash + 1);
+    const { data: files, error: listError } = await this.supabase.admin.storage
       .from(this.config.storageBucket)
-      .exists(doc.storage_path);
-    if (existsError || !exists) {
+      .list(folder, { search: fileName, limit: 10 });
+    if (listError) {
+      this.logger.error(`Storage list falló para ${doc.storage_path}: ${listError.message}`);
+      throw new InternalServerErrorException('No se pudo verificar el archivo en Storage');
+    }
+    if (!files?.some((f) => f.name === fileName)) {
+      this.logger.warn(`Archivo no encontrado en Storage: ${doc.storage_path}`);
       throw new BadRequestException('El archivo no se encuentra en Storage; súbelo de nuevo');
     }
 
@@ -173,6 +185,6 @@ export class DocumentsController {
     const { error } = await this.supabase.admin.storage
       .from(this.config.storageBucket)
       .remove([deleted.storage_path]);
-    if (error) console.error('No se pudo borrar el archivo', deleted.storage_path, error);
+    if (error) this.logger.error(`No se pudo borrar ${deleted.storage_path}: ${error.message}`);
   }
 }
