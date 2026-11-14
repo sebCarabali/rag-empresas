@@ -3,6 +3,7 @@ import { QueueClient } from '@vercel/queue';
 import { AppConfig } from '../config/app-config';
 import { EnrichmentService, type EnrichJob } from '../enrichment/enrichment.service';
 import { EvalRunnerService, type EvalJob } from '../evals/eval-runner.service';
+import { CacheWarmService, type WarmJob } from '../cache/cache-warm.service';
 import {
   IngestionService,
   PermanentIngestionError,
@@ -10,7 +11,7 @@ import {
 } from '../ingestion/ingestion.service';
 
 /** Mensajes del topic: procesar un documento, generar descripciones web o ejecutar pruebas de calidad. */
-export type QueueJob = IngestionJob | EnrichJob | EvalJob;
+export type QueueJob = IngestionJob | EnrichJob | EvalJob | WarmJob;
 
 function isEnrichJob(job: QueueJob): job is EnrichJob {
   return (job as EnrichJob).kind === 'enrich';
@@ -20,7 +21,12 @@ function isEvalJob(job: QueueJob): job is EvalJob {
   return (job as EvalJob).kind === 'eval';
 }
 
+function isWarmJob(job: QueueJob): job is WarmJob {
+  return (job as WarmJob).kind === 'warm';
+}
+
 function jobId(job: QueueJob): string {
+  if (isWarmJob(job)) return `warm:${job.projectId}:${job.runId ?? 'auto'}:${job.batch ?? 0}`;
   if (isEvalJob(job)) return `eval:${job.runId}:${job.batch ?? 0}`;
   if (isEnrichJob(job)) return `enrich:${job.projectId}:${job.force ? 'f' : ''}`;
   return `${job.documentId}:${job.startChunk}`;
@@ -51,6 +57,7 @@ export class IngestionQueueService {
     private readonly ingestion: IngestionService,
     private readonly enrichment: EnrichmentService,
     private readonly evals: EvalRunnerService,
+    private readonly warm: CacheWarmService,
   ) {}
 
   async enqueue(job: QueueJob): Promise<void> {
@@ -68,10 +75,17 @@ export class IngestionQueueService {
   async handleMessage(job: QueueJob, deliveryCount: number): Promise<void> {
     if (isEnrichJob(job)) return this.handleEnrich(job, deliveryCount);
     if (isEvalJob(job)) return this.handleEval(job, deliveryCount);
+    if (isWarmJob(job)) return this.handleWarm(job, deliveryCount);
     try {
       const result = await this.ingestion.process(job);
-      if (result.next) await this.enqueue(result.next);
-      if (result.enrichProjectId) await this.enqueue({ kind: 'enrich', projectId: result.enrichProjectId });
+      if (result.next) {
+        await this.enqueue(result.next);
+      } else if (result.enrichProjectId && this.config.webEnrichment) {
+        // Las descripciones web cambian la versión del contenido: se precalienta al terminar.
+        await this.enqueue({ kind: 'enrich', projectId: result.enrichProjectId });
+      } else if (result.projectId) {
+        await this.autoWarm(result.projectId);
+      }
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       const permanent = err instanceof PermanentIngestionError;
@@ -90,6 +104,7 @@ export class IngestionQueueService {
     try {
       const result = await this.enrichment.run(job);
       if (result.next) await this.enqueue(result.next);
+      else await this.autoWarm(job.projectId);
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       if (deliveryCount >= MAX_DELIVERIES) {
@@ -113,6 +128,29 @@ export class IngestionQueueService {
         return;
       }
       this.logger.warn(`Prueba de calidad ${job.runId}, intento ${deliveryCount}: ${message}`);
+      throw err;
+    }
+  }
+
+  /** Precalentamiento automático tras cambiar el contenido (si está activado). */
+  private async autoWarm(projectId: string): Promise<void> {
+    if (!this.warm.autoEnabled || !this.config.answerCacheTtlHours) return;
+    await this.enqueue({ kind: 'warm', projectId }).catch((err) =>
+      this.logger.warn(`No se pudo encolar el precalentamiento: ${(err as Error).message}`),
+    );
+  }
+
+  private async handleWarm(job: WarmJob, deliveryCount: number): Promise<void> {
+    try {
+      const result = await this.warm.run(job);
+      if (result.next) await this.enqueue(result.next);
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      if (deliveryCount >= MAX_DELIVERIES) {
+        this.logger.error(`Precalentamiento de ${job.projectId} falló: ${message}`);
+        await this.warm.markFailed(job.runId, message);
+        return;
+      }
       throw err;
     }
   }

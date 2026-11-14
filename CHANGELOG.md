@@ -2,6 +2,15 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.11.0] - 2026-11-14
+
+### Agregado
+
+- Caché por significado: una pregunta parecida reutiliza la respuesta guardada si menciona las mismas cifras y términos del catálogo. El chat indica qué pregunta se reutilizó.
+- Precalentamiento de la caché (botón y automático al cambiar los documentos) con las preguntas sugeridas y las más frecuentes del widget y del equipo.
+- Panel «Uso y caché»: preguntas por día y origen, porcentaje desde la caché, uso del respaldo, tokens, gasto y ahorro estimados.
+- Registro de tokens de Gemini y Groq (chat, widget, pruebas, OCR y descripciones web).
+
 ## [0.10.1] - 2026-11-14
 
 ### Corregido

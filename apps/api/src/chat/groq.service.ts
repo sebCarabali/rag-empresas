@@ -58,7 +58,12 @@ export class GroqService {
 
     for (let round = 0; ; round++) {
       const useTools = hasTools && round < MAX_TOOL_ROUNDS;
-      const body: Record<string, unknown> = { model: this.config.groqModel, messages, stream: true };
+      const body: Record<string, unknown> = {
+        model: this.config.groqModel,
+        messages,
+        stream: true,
+        stream_options: { include_usage: true },
+      };
       if (useTools) {
         body.tools = tools;
         body.tool_choice = 'auto';
@@ -80,6 +85,10 @@ export class GroqService {
       let content = '';
       const calls = new Map<number, PendingCall>();
       for await (const delta of readSse(res.body)) {
+        if (delta.usage) {
+          yield { type: 'usage', input: delta.usage.prompt_tokens ?? 0, output: delta.usage.completion_tokens ?? 0 };
+          continue;
+        }
         if (delta.content) {
           content += delta.content;
           yield { type: 'text', text: delta.content };
@@ -119,6 +128,8 @@ export class GroqService {
 
 interface SseDelta {
   content?: string | null;
+  /** Solo en el último evento (stream_options.include_usage). */
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
   tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
 }
 
@@ -141,6 +152,8 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator
         if (json.error) throw new Error(`Groq: ${json.error.message ?? JSON.stringify(json.error)}`);
         const delta = json.choices?.[0]?.delta;
         if (delta) yield delta as SseDelta;
+        const usage = json.usage;
+        if (usage) yield { usage } as SseDelta;
       }
     }
   }

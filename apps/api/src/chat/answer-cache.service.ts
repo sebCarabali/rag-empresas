@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { AppConfig } from '../config/app-config';
+import { toPgVector } from '../embeddings/embeddings.service';
 import { SupabaseService } from '../supabase/supabase.service';
+import { buildVocabulary } from './semantic-guard';
 import type { CatalogToolCall } from './catalog-tools';
 import type { ModelInfo } from './llm.service';
 import type { Source } from './prompt';
@@ -13,6 +15,23 @@ export interface CachedAnswer {
   toolCalls: CatalogToolCall[];
   modelInfo?: ModelInfo | null;
 }
+
+/** Datos para la búsqueda por significado de una entrada. */
+export interface SemanticFields {
+  embedding: number[] | null;
+  version: string;
+  variant: string;
+}
+
+export interface SimilarQuestion {
+  cache_key: string;
+  question: string;
+  similarity: number;
+}
+
+/** Vocabulario del catálogo por proyecto y versión del contenido (dura poco en memoria). */
+const vocabularyCache = new Map<string, { at: number; words: Set<string> }>();
+const VOCABULARY_TTL_MS = 10 * 60_000;
 
 /** Sube si cambia el prompt, el formato de las fuentes o la lógica de búsqueda. */
 const CACHE_SCHEMA_VERSION = 'v1';
@@ -42,6 +61,41 @@ export class AnswerCacheService {
 
   get enabled(): boolean {
     return this.config.answerCacheTtlHours > 0;
+  }
+
+  get semanticEnabled(): boolean {
+    return this.enabled && this.config.semanticCacheMinSimilarity < 1;
+  }
+
+  /** Preguntas en caché con significado parecido (misma versión del contenido y del asistente). */
+  async similar(projectId: string, version: string, variant: string, embedding: number[]): Promise<SimilarQuestion[]> {
+    const { data, error } = await this.supabase.admin.rpc('match_answer_cache', {
+      p_project_id: projectId,
+      p_version: version,
+      p_variant: variant,
+      p_model: this.config.geminiModel,
+      p_embedding: toPgVector(embedding),
+      p_min_similarity: this.config.semanticCacheMinSimilarity,
+      p_limit: 5,
+    });
+    if (error) {
+      this.logger.warn(`Caché por significado no disponible: ${error.message}`);
+      return [];
+    }
+    return (data ?? []) as SimilarQuestion[];
+  }
+
+  /** Términos distintivos del catálogo del proyecto (para el control léxico). */
+  async vocabulary(db: SupabaseClient, projectId: string, version: string): Promise<Set<string>> {
+    const id = `${projectId}:${version}`;
+    const hit = vocabularyCache.get(id);
+    if (hit && Date.now() - hit.at < VOCABULARY_TTL_MS) return hit.words;
+    const { data, error } = await db.rpc('catalog_vocabulary', { p_project_id: projectId });
+    if (error) this.logger.warn(`Vocabulario del catálogo no disponible: ${error.message}`);
+    const words = buildVocabulary(((data ?? []) as unknown[]).map((w) => String(w)));
+    if (vocabularyCache.size > 200) vocabularyCache.clear();
+    vocabularyCache.set(id, { at: Date.now(), words });
+    return words;
   }
 
   /**
@@ -127,7 +181,13 @@ export class AnswerCacheService {
     };
   }
 
-  async put(key: string, projectId: string, question: string, value: CachedAnswer): Promise<void> {
+  async put(
+    key: string,
+    projectId: string,
+    question: string,
+    value: CachedAnswer,
+    semantic?: SemanticFields,
+  ): Promise<void> {
     const expires = new Date(Date.now() + this.config.answerCacheTtlHours * 3600_000);
     const { error } = await this.supabase.admin.from('answer_cache').upsert({
       cache_key: key,
@@ -140,6 +200,10 @@ export class AnswerCacheService {
       hits: 0,
       created_at: new Date().toISOString(),
       expires_at: expires.toISOString(),
+      question_embedding: semantic?.embedding ? toPgVector(semantic.embedding) : null,
+      content_version: semantic?.version ?? null,
+      variant: semantic?.variant ?? null,
+      model: this.config.geminiModel,
     });
     if (error) this.logger.warn(`No se pudo guardar en caché: ${error.message}`);
 

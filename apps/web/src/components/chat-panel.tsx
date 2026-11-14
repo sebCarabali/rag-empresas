@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { api, type Chatbot, type Conversation, type Feedback, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
+import { api, type CacheMatch, type Chatbot, type Conversation, type Feedback, type Message, type ModelInfo, type Source, type ToolCall } from '@/lib/api';
 import { FeedbackButtons } from './feedback-buttons';
 import { Button, ErrorText } from './ui';
 
@@ -13,6 +13,7 @@ interface ChatMessage {
   toolCalls?: ToolCall[];
   modelInfo?: ModelInfo | null;
   cached?: boolean;
+  cacheMatch?: CacheMatch | null;
   streaming?: boolean;
   feedback?: Feedback | null;
 }
@@ -112,8 +113,8 @@ export function ChatPanel({ projectId, bot }: { projectId: string; bot?: Chatbot
           onTool: (call) => update((msg) => ({ ...msg, toolCalls: [...(msg.toolCalls ?? []), call] })),
           onModel: (info) => update((msg) => ({ ...msg, modelInfo: info })),
           onReset: () => update((msg) => ({ ...msg, content: '', toolCalls: [] })),
-          onDone: ({ messageId, title, cached }) => {
-            update((msg) => ({ ...msg, id: messageId, streaming: false, cached }));
+          onDone: ({ messageId, title, cached, cacheMatch }) => {
+            update((msg) => ({ ...msg, id: messageId, streaming: false, cached, cacheMatch }));
             setConversations((list) =>
               list.map((c) => (c.id === conversationId ? { ...c, title } : c)),
             );
@@ -274,7 +275,10 @@ function MessageBubble({ message, color }: { message: ChatMessage; color: string
                 message.modelInfo.keyOwner === 'company' ? ' · clave de la empresa' : ''
               }`}
             {message.modelInfo && message.cached && ' · '}
-            {message.cached && 'Respuesta desde caché'}
+            {message.cached &&
+              (message.cacheMatch?.kind === 'semantic'
+                ? `Respuesta desde caché · pregunta parecida: «${message.cacheMatch.question}»`
+                : 'Respuesta desde caché')}
           </p>
         )}
         {!isUser && !message.streaming && !message.id.startsWith('tmp-') && message.content && (

@@ -87,6 +87,49 @@ export interface Message {
   created_at: string;
 }
 
+/** Cómo se encontró una respuesta en la caché. */
+export interface CacheMatch {
+  kind: 'exact' | 'semantic';
+  question?: string;
+  similarity?: number;
+}
+
+export interface UsageDay {
+  day: string;
+  channel: 'app' | 'widget' | 'eval' | 'warm' | 'ocr' | 'enrich';
+  total: number;
+  cache_exact: number;
+  cache_semantic: number;
+  groq: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | string;
+  company_cost: number | string | null;
+  avg_ms: number | null;
+}
+
+export interface UsageReport {
+  days: number;
+  daily: UsageDay[];
+  cachedAnswers: number;
+  prices: { gemini: { input: number; output: number }; groq: { input: number; output: number } };
+  models: { gemini: string; groq: string };
+  semanticThreshold: number;
+  autoWarm: boolean;
+}
+
+export interface WarmRun {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'skipped';
+  trigger: 'manual' | 'auto';
+  total: number;
+  done: number;
+  generated: number;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
 export interface Feedback {
   rating: -1 | 1;
   comment: string | null;
@@ -204,6 +247,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  usage: (projectId: string, days = 30) =>
+    request<UsageReport>(
+      'GET',
+      `/projects/${projectId}/usage?days=${days}&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
+    ),
+  warmRuns: (projectId: string) => request<WarmRun[]>('GET', `/projects/${projectId}/cache/warm`),
+  warmCache: (projectId: string) => request<WarmRun>('POST', `/projects/${projectId}/cache/warm`),
   rateMessage: (messageId: string, rating: -1 | 1, comment?: string) =>
     request<Feedback>('PUT', `/messages/${messageId}/feedback`, { rating, comment }),
   unrateMessage: (messageId: string) => request<void>('DELETE', `/messages/${messageId}/feedback`),
@@ -291,7 +341,7 @@ export const api = {
       onTool: (call: ToolCall) => void;
       onModel: (info: ModelInfo) => void;
       onReset: () => void;
-      onDone: (info: { messageId: string; title: string; cached: boolean }) => void;
+      onDone: (info: { messageId: string; title: string; cached: boolean; cacheMatch?: CacheMatch | null }) => void;
       onError: (message: string) => void;
     },
     signal?: AbortSignal,

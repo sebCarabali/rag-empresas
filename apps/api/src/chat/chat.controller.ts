@@ -16,7 +16,7 @@ import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../common/supabase-error';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ChatbotsService } from '../chatbots/chatbots.service';
-import { ChatEngineService } from './chat-engine.service';
+import { ChatEngineService, type CacheMatch } from './chat-engine.service';
 import type { CatalogToolCall } from './catalog-tools';
 import { type ChatTurn } from './gemini.service';
 import type { ModelInfo } from './llm.service';
@@ -174,6 +174,7 @@ export class ChatController {
       toolCalls: CatalogToolCall[],
       cached: boolean,
       modelInfo: ModelInfo | null,
+      cacheMatch: CacheMatch | null,
     ) => {
       const saved = unwrap(
         await db
@@ -190,18 +191,18 @@ export class ChatController {
           .single(),
       );
       await db.from('conversations').update({ title }).eq('id', conversationId);
-      emit({ type: 'done', messageId: saved.id, title, cached });
+      emit({ type: 'done', messageId: saved.id, title, cached, cacheMatch });
     };
 
     let answer = '';
     try {
       const bot = this.chatbots.profile(await this.chatbots.findByProject(db, projectId), 'internal');
       const result = await this.engine.ask(
-        { db, projectId, companyId: conversation.company_id, question, history: previous, bot, emit, signal: abort.signal },
+        { db, projectId, companyId: conversation.company_id, question, history: previous, bot, emit, signal: abort.signal, channel: 'app' },
         (partial) => (answer = partial),
       );
       answer = result.answer;
-      await finish(result.answer, result.sources, result.toolCalls, result.cached, result.modelInfo);
+      await finish(result.answer, result.sources, result.toolCalls, result.cached, result.modelInfo, result.cacheMatch);
     } catch (err) {
       if (abort.signal.aborted) {
         this.logger.warn(`Cliente canceló la respuesta en ${conversationId}`);

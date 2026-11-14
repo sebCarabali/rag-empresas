@@ -160,6 +160,7 @@ export class WidgetController {
         bot: this.chatbots.profile(bot, 'public'),
         emit,
         signal: abort.signal,
+        channel: 'widget',
       });
       // Registro para que la empresa vea lo que preguntan sus visitantes.
       const { data: logged, error: logError } = await db

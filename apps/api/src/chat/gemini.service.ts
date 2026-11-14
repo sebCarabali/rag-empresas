@@ -8,6 +8,7 @@ import {
   type Part,
 } from '@google/genai';
 import { AppConfig } from '../config/app-config';
+import { geminiUsage } from '../usage/usage.service';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -18,7 +19,9 @@ export type ToolExecutor = (name: string, args: Record<string, unknown>) => Prom
 
 export type GeminiEvent =
   | { type: 'text'; text: string }
-  | { type: 'tool'; name: string; args: Record<string, unknown>; result: Record<string, unknown> };
+  | { type: 'tool'; name: string; args: Record<string, unknown>; result: Record<string, unknown> }
+  /** Tokens de una llamada al modelo (una por ronda). */
+  | { type: 'usage'; input: number; output: number };
 
 /** Rondas máximas de llamadas a herramientas antes de forzar la respuesta final. */
 const MAX_TOOL_ROUNDS = 4;
@@ -96,7 +99,9 @@ export class GeminiService {
       // porque Gemini las exige de vuelta al continuar tras una llamada.
       const modelParts: Part[] = [];
       const calls: FunctionCall[] = [];
+      let usage: ReturnType<typeof geminiUsage> = null;
       for await (const chunk of stream) {
+        usage = geminiUsage(chunk.usageMetadata) ?? usage; // el último trae el total de la llamada
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
           modelParts.push(part);
           if (part.functionCall) calls.push(part.functionCall);
@@ -106,6 +111,8 @@ export class GeminiService {
           }
         }
       }
+
+      if (usage) yield { type: 'usage', ...usage };
 
       if (finalRound || !hasTools || calls.length === 0) {
         if (wroteText) return;
