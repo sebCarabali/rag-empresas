@@ -68,7 +68,15 @@ export class IngestionService {
     }
 
     if (job.startChunk === 0) {
-      await this.updateDocument(doc.id, { status: 'processing', error: null, chunk_count: 0 });
+      await this.updateDocument(doc.id, {
+        status: 'processing',
+        error: null,
+        chunk_count: 0,
+        progress_stage: 'reading',
+        progress_done: 0,
+        progress_total: 0,
+        processing_started_at: new Date().toISOString(),
+      });
       // Reprocesamiento: borrar chunks anteriores.
       const { error: delError } = await db.from('document_chunks').delete().eq('document_id', doc.id);
       if (delError) throw new Error(delError.message);
@@ -105,6 +113,7 @@ export class IngestionService {
 
     // Catálogo estructurado (filtros exactos y conteos): se reemplaza al iniciar el documento.
     if (job.startChunk === 0 && TABULAR_MIME_TYPES.has(doc.mime_type)) {
+      await this.updateDocument(doc.id, { progress_stage: 'catalog', progress_total: chunks.length });
       await this.replaceCatalog(doc, catalogItems);
     }
 
@@ -114,9 +123,21 @@ export class IngestionService {
       );
     }
 
+    await this.updateDocument(doc.id, {
+      progress_stage: 'embedding',
+      progress_done: job.startChunk,
+      progress_total: chunks.length,
+    });
+    let lastProgress = Date.now();
+
     for (let i = job.startChunk; i < chunks.length; i += EMBED_BATCH_SIZE) {
+      // Avance visible en la app, como mucho cada 1,5 s para no saturar la base.
+      if (i > job.startChunk && Date.now() - lastProgress > 1500) {
+        lastProgress = Date.now();
+        await this.updateDocument(doc.id, { progress_done: i }).catch(() => undefined);
+      }
       if (i > job.startChunk && Date.now() - started > TIME_BUDGET_MS) {
-        await this.updateDocument(doc.id, { chunk_count: i });
+        await this.updateDocument(doc.id, { chunk_count: i, progress_done: i });
         this.logger.log(`Documento ${doc.id}: ${i}/${chunks.length} chunks; continúa en otro lote`);
         return { next: { documentId: doc.id, startChunk: i } };
       }
@@ -140,7 +161,14 @@ export class IngestionService {
       if (upsertError) throw new Error(upsertError.message);
     }
 
-    await this.updateDocument(doc.id, { status: 'ready', chunk_count: chunks.length, error: null });
+    await this.updateDocument(doc.id, {
+      status: 'ready',
+      chunk_count: chunks.length,
+      error: null,
+      progress_stage: 'done',
+      progress_done: chunks.length,
+      progress_total: chunks.length,
+    });
     this.logger.log(`Documento ${doc.id} listo: ${chunks.length} chunks en ${Date.now() - started} ms`);
     return TABULAR_MIME_TYPES.has(doc.mime_type)
       ? { enrichProjectId: doc.project_id, projectId: doc.project_id }
@@ -152,7 +180,7 @@ export class IngestionService {
    * para que los lotes siguientes (y los reprocesos) no vuelvan a pagar el OCR.
    */
   private async cachedOcr(
-    doc: { company_id: string; project_id: string; storage_path: string },
+    doc: { id: string; company_id: string; project_id: string; storage_path: string },
     buffer: Buffer,
     mimeType: string,
   ): Promise<TextSection[]> {
@@ -167,6 +195,7 @@ export class IngestionService {
       }
     }
     let sections: TextSection[];
+    await this.updateDocument(doc.id, { progress_stage: 'ocr' }).catch(() => undefined);
     try {
       const companyKey = await this.keys.getGeminiKey(doc.company_id);
       sections = await this.ocr.transcribe(buffer, mimeType, companyKey, {

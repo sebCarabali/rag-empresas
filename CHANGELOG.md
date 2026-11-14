@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.12.0] - 2026-11-14
+
+### Agregado
+
+- Avance de la subida de cada archivo (MB subidos y porcentaje), con varios archivos en cola.
+- Avance del procesamiento: etapa (en cola, lectura, OCR, catálogo, índice de búsqueda), fragmentos procesados de un total, porcentaje y tiempo restante estimado.
+
 ## [0.11.0] - 2026-11-14
 
 ### Agregado
