@@ -2,10 +2,11 @@ packages:
   - apps/*
 
 # pnpm 10 bloquea los scripts de instalación por defecto.
-# Estas dependencias los necesitan (binarios nativos).
+# Estas dependencias los necesitan. onnxruntime-node NO está aquí a propósito:
+# sus binarios de CPU vienen en el paquete y su postinstall solo descarga CUDA
+# (cientos de MB que no caben en una Vercel Function).
 onlyBuiltDependencies:
   - '@nestjs/core'
-  - onnxruntime-node
   - protobufjs
   - sharp
   - unrs-resolver
