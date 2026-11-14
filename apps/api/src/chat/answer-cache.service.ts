@@ -27,6 +27,22 @@ export interface SimilarQuestion {
   cache_key: string;
   question: string;
   similarity: number;
+  variant: string | null;
+}
+
+/**
+ * Respuestas que dicen que no hay información ("no aparece", "no encontré"…).
+ * Suelen venir de una búsqueda que no trajo lo necesario o del modelo de
+ * respaldo sin herramientas: guardarlas fijaría un "no" incorrecto.
+ */
+const NEGATIVE_ANSWER =
+  /\b(no (se )?(encontr|aparec|hay (informaci|datos)|tengo (informaci|datos)|dispongo|cuento con|figura|incluye|contiene|menciona|se enumeran)|sin informaci|lo siento)/;
+
+export function isNegativeAnswer(answer: string): boolean {
+  // Solo la primera oración: una respuesta útil puede aclarar más adelante lo que no está.
+  const first = answer.trim().split(/(?<=[.!?])\s|\n/)[0].slice(0, 240);
+  const opening = AnswerCacheService.normalizeQuestion(first);
+  return NEGATIVE_ANSWER.test(opening);
 }
 
 /** Vocabulario del catálogo por proyecto y versión del contenido (dura poco en memoria). */
@@ -68,14 +84,20 @@ export class AnswerCacheService {
   }
 
   /** Preguntas en caché con significado parecido (misma versión del contenido y del asistente). */
-  async similar(projectId: string, version: string, variant: string, embedding: number[]): Promise<SimilarQuestion[]> {
+  async similar(
+    projectId: string,
+    version: string,
+    variant: string | null,
+    embedding: number[],
+    minSimilarity = this.config.semanticCacheMinSimilarity,
+  ): Promise<SimilarQuestion[]> {
     const { data, error } = await this.supabase.admin.rpc('match_answer_cache', {
       p_project_id: projectId,
       p_version: version,
       p_variant: variant,
       p_model: this.config.geminiModel,
       p_embedding: toPgVector(embedding),
-      p_min_similarity: this.config.semanticCacheMinSimilarity,
+      p_min_similarity: minSimilarity,
       p_limit: 5,
     });
     if (error) {
@@ -188,6 +210,10 @@ export class AnswerCacheService {
     value: CachedAnswer,
     semantic?: SemanticFields,
   ): Promise<void> {
+    if (isNegativeAnswer(value.answer)) {
+      this.logger.log(`No se guarda en caché una respuesta sin información: "${question}"`);
+      return;
+    }
     const expires = new Date(Date.now() + this.config.answerCacheTtlHours * 3600_000);
     const { error } = await this.supabase.admin.from('answer_cache').upsert({
       cache_key: key,
@@ -207,13 +233,14 @@ export class AnswerCacheService {
     });
     if (error) this.logger.warn(`No se pudo guardar en caché: ${error.message}`);
 
-    // Limpieza ocasional de entradas vencidas del proyecto.
-    if (Math.random() < 0.1) {
-      await this.supabase.admin
+    // Las entradas de versiones anteriores del contenido ya no se pueden usar: se borran.
+    if (semantic?.version) {
+      const { error: cleanError } = await this.supabase.admin
         .from('answer_cache')
         .delete()
         .eq('project_id', projectId)
-        .lt('expires_at', new Date().toISOString());
+        .or(`content_version.is.null,content_version.neq.${JSON.stringify(semantic.version)},expires_at.lt.${JSON.stringify(new Date().toISOString())}`);
+      if (cleanError) this.logger.warn(`No se limpió la caché: ${cleanError.message}`);
     }
   }
 }

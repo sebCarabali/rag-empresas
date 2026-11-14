@@ -121,6 +121,12 @@ export class ChatEngineService {
         semantic.embedding = await this.embeddings.embedQuery(question);
         found = await this.findSimilar(db, projectId, question, semantic);
       }
+      // 1c) La misma pregunta ya respondida por Gemini en el otro canal (chat interno / widget)
+      // con el mismo contenido: se reutiliza en vez de volver a generar o de usar Groq.
+      if (!found || found.hit.modelInfo?.fallback) {
+        semantic.embedding ??= await this.embeddings.embedQuery(question);
+        found = (await this.findGeminiSibling(projectId, question, semantic)) ?? found;
+      }
       if (found && !found.hit.modelInfo?.fallback) return this.serveCached(found.hit, emit, found.match);
       // Respuesta guardada del respaldo (Groq): es provisional. Se intenta con Gemini;
       // si responde, la reemplaza en la caché; si no, se entrega la guardada.
@@ -168,6 +174,25 @@ export class ChatEngineService {
       if (hit) {
         this.logger.log(`Caché por significado (${c.similarity.toFixed(3)}): "${question}" → "${c.question}"`);
         return { hit, match: { kind: 'semantic', question: c.question, similarity: Number(c.similarity.toFixed(3)) } };
+      }
+    }
+    return null;
+  }
+
+  /** Misma pregunta (normalizada) respondida por Gemini en otra variante, con el mismo contenido. */
+  private async findGeminiSibling(
+    projectId: string,
+    question: string,
+    semantic: SemanticFields,
+  ): Promise<{ hit: CachedAnswer; match: CacheMatch } | null> {
+    const normalized = AnswerCacheService.normalizeQuestion(question);
+    const candidates = await this.cache.similar(projectId, semantic.version, null, semantic.embedding!, 0.97);
+    for (const c of candidates) {
+      if (c.variant === semantic.variant || AnswerCacheService.normalizeQuestion(c.question) !== normalized) continue;
+      const hit = await this.cache.get(c.cache_key);
+      if (hit && !hit.modelInfo?.fallback) {
+        this.logger.log(`Caché de otra variante (${c.variant}): "${question}"`);
+        return { hit, match: { kind: 'exact' } };
       }
     }
     return null;

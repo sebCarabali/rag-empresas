@@ -179,3 +179,16 @@ test('caché por significado: descarta si cambia un término del catálogo', asy
   assert.deepEqual(result.usage, { input: 1000, output: 200 });
   assert.equal(runs.length, 1);
 });
+
+test('misma pregunta respondida por Gemini en el otro canal: se reutiliza sin llamar al modelo', async () => {
+  const cached = { answer: 'Kafka es…', sources: [], toolCalls: [], modelInfo: { provider: 'gemini', model: 'g', fallback: false } };
+  const { engine, runs } = engineWith([], {
+    cached,
+    similar: [{ cache_key: 'parecida', question: 'Cómo funciona Kafka', similarity: 0.999, variant: 'public' } as never],
+    vocabulary: ['kafka'],
+  });
+  const result = await engine.ask({ ...input(), question: '¿cómo funciona kafka?' });
+  assert.equal(result.cached, true);
+  assert.equal(result.answer, 'Kafka es…');
+  assert.equal(runs.length, 0);
+});
