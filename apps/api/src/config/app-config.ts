@@ -70,4 +70,7 @@ export class AppConfig {
   readonly ingestInline = optional('INGEST_INLINE', process.env.VERCEL ? 'false' : 'true') === 'true';
 
   readonly maxUploadBytes = 50 * 1024 * 1024;
+
+  /** Horas que dura una respuesta en caché. 0 desactiva la caché. */
+  readonly answerCacheTtlHours = Number(optional('ANSWER_CACHE_TTL_HOURS', '168'));
 }

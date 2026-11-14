@@ -40,9 +40,18 @@ export interface Conversation {
 export interface Source {
   index: number;
   documentId: string;
+  chunkIndex?: number;
   documentName: string;
   page?: number;
   snippet: string;
+}
+
+/** Consulta exacta que el asistente hizo al catálogo estructurado. */
+export interface ToolCall {
+  name: string;
+  summary: string;
+  total: number | null;
+  error?: string;
 }
 
 export interface Message {
@@ -50,6 +59,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   sources: Source[];
+  tool_calls?: ToolCall[];
   created_at: string;
 }
 
@@ -132,7 +142,8 @@ export const api = {
     handlers: {
       onSources: (sources: Source[]) => void;
       onDelta: (text: string) => void;
-      onDone: (info: { messageId: string; title: string }) => void;
+      onTool: (call: ToolCall) => void;
+      onDone: (info: { messageId: string; title: string; cached: boolean }) => void;
       onError: (message: string) => void;
     },
     signal?: AbortSignal,
@@ -163,6 +174,7 @@ export const api = {
         const event = JSON.parse(line);
         if (event.type === 'sources') handlers.onSources(event.sources);
         else if (event.type === 'delta') handlers.onDelta(event.text);
+        else if (event.type === 'tool') handlers.onTool(event.call);
         else if (event.type === 'done') handlers.onDone(event);
         else if (event.type === 'error') handlers.onError(event.message);
       }

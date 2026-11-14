@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { api, type Conversation, type Message, type Source } from '@/lib/api';
+import { api, type Conversation, type Message, type Source, type ToolCall } from '@/lib/api';
 import { Button, ErrorText } from './ui';
 
 interface ChatMessage {
@@ -9,6 +9,8 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   sources: Source[];
+  toolCalls?: ToolCall[];
+  cached?: boolean;
   streaming?: boolean;
 }
 
@@ -36,7 +38,8 @@ export function ChatPanel({ projectId }: { projectId: string }) {
     if (!activeId) return;
     let cancelled = false;
     api.messages(activeId).then(
-      (list: Message[]) => !cancelled && setMessages(list),
+      (list: Message[]) =>
+        !cancelled && setMessages(list.map((m) => ({ ...m, toolCalls: m.tool_calls ?? [] }))),
       (e) => !cancelled && setError(e.message),
     );
     return () => {
@@ -98,8 +101,9 @@ export function ChatPanel({ projectId }: { projectId: string }) {
         {
           onSources: (sources) => update((msg) => ({ ...msg, sources })),
           onDelta: (text) => update((msg) => ({ ...msg, content: msg.content + text })),
-          onDone: ({ messageId, title }) => {
-            update((msg) => ({ ...msg, id: messageId, streaming: false }));
+          onTool: (call) => update((msg) => ({ ...msg, toolCalls: [...(msg.toolCalls ?? []), call] })),
+          onDone: ({ messageId, title, cached }) => {
+            update((msg) => ({ ...msg, id: messageId, streaming: false, cached }));
             setConversations((list) =>
               list.map((c) => (c.id === conversationId ? { ...c, title } : c)),
             );
@@ -206,11 +210,28 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           isUser ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
         }`}
       >
+        {!isUser && (message.toolCalls?.length ?? 0) > 0 && (
+          <ul className="mb-2 space-y-1">
+            {message.toolCalls!.map((call, i) => (
+              <li key={i} className="rounded-md bg-white px-2 py-1 text-xs text-slate-600">
+                <span className="font-medium">Consulta al catálogo:</span> {call.summary}
+                {call.error ? (
+                  <span className="text-red-600"> · error</span>
+                ) : (
+                  call.total !== null && <span> · {call.total.toLocaleString('es')} resultados</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="whitespace-pre-wrap">
           {message.content}
           {message.streaming && !message.content && <span className="animate-pulse">Buscando en los documentos…</span>}
           {message.streaming && message.content && <span className="animate-pulse">▍</span>}
         </p>
+        {!isUser && message.cached && (
+          <p className="mt-1 text-[11px] text-slate-400">Respuesta desde caché</p>
+        )}
         {!isUser && message.sources.length > 0 && !message.streaming && (
           <details className="mt-2 text-xs text-slate-600">
             <summary className="cursor-pointer select-none">Fuentes ({message.sources.length})</summary>
