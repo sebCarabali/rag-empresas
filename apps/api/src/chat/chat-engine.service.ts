@@ -68,13 +68,13 @@ type Generated = Omit<AskResult, 'cached' | 'cacheMatch'>;
 /** Modelos resueltos para una pregunta. */
 interface GenerateContext {
   route: LlmRoute;
-  embed: { model: string; companyId: string };
+  embed: { model: string; projectId: string };
 }
 
 /**
  * Responde una pregunta sobre un proyecto, emitiendo eventos NDJSON:
  * caché (exacta o por significado) → búsqueda híbrida → descripciones web →
- * herramientas de catálogo → Gemini (clave de la empresa o de la plataforma)
+ * herramientas de catálogo → modelo elegido (con la clave del asistente)
  * con respaldo en Groq. Lo usan el chat de la app, el widget, las pruebas de
  * calidad y el precalentamiento de la caché.
  */
@@ -103,7 +103,7 @@ export class ChatEngineService {
       provider: result.modelInfo?.provider ?? null,
       model: result.modelInfo?.model ?? null,
       fallback: result.modelInfo?.fallback ?? false,
-      keyOwner: result.modelInfo?.keyOwner ?? (result.modelInfo?.fallback ? 'platform' : null),
+      keyOwner: result.modelInfo ? 'company' : null,
       usage: result.usage,
       durationMs: Date.now() - started,
     });
@@ -115,8 +115,8 @@ export class ChatEngineService {
 
     // Modelos elegidos en la configuración del asistente (por defecto Gemini + Groq y E5 local).
     const settings = await this.models.get(projectId);
-    const route = await this.models.route(input.companyId, settings);
-    const embed = { model: settings.embeddingModel || this.embeddings.modelId(), companyId: input.companyId };
+    const route = await this.models.route(projectId, settings);
+    const embed = { model: settings.embeddingModel || this.embeddings.modelId(), projectId };
     const ctx: GenerateContext = { route, embed };
 
     // 1) Caché: cualquier pregunta que se entienda sola (no las de seguimiento).

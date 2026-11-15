@@ -8,7 +8,7 @@ import { csvToCatalogItems, csvToChunks, type CatalogItem } from './csv-catalog'
 import { OcrService } from './ocr.service';
 import { spreadsheetToTable, XLSX_MIME } from './spreadsheet';
 import { extractText, TABULAR_MIME_TYPES, UnsupportedFileError, type TextSection } from './text-extractor';
-import { CompanyKeysService } from '../companies/company-keys.service';
+import { ProjectKeysService } from '../models/project-keys.service';
 
 export interface IngestionJob {
   documentId: string;
@@ -46,7 +46,7 @@ export class IngestionService {
     private readonly models: ModelSettingsService,
     private readonly config: AppConfig,
     private readonly ocr: OcrService,
-    private readonly keys: CompanyKeysService,
+    private readonly keys: ProjectKeysService,
   ) {}
 
   /**
@@ -132,7 +132,7 @@ export class IngestionService {
     });
     let lastProgress = Date.now();
     // Modelo de embeddings elegido para el proyecto (las claves de API son de la empresa).
-    const embed = { model: await this.models.embeddingModel(doc.project_id), companyId: doc.company_id };
+    const embed = { model: await this.models.embeddingModel(doc.project_id), projectId: doc.project_id };
 
     for (let i = job.startChunk; i < chunks.length; i += EMBED_BATCH_SIZE) {
       // Avance visible en la app, como mucho cada 1,5 s para no saturar la base.
@@ -201,9 +201,15 @@ export class IngestionService {
     }
     let sections: TextSection[];
     await this.updateDocument(doc.id, { progress_stage: 'ocr' }).catch(() => undefined);
+    // El OCR usa Gemini con la clave del asistente: sin ella no se puede leer el escaneo.
+    const geminiKey = await this.keys.getKey(doc.project_id, 'gemini');
+    if (!geminiKey) {
+      throw new PermanentIngestionError(
+        'Para leer PDF escaneados o imágenes, guarda la clave de Gemini del asistente (Asistente y widget → Modelos) y reprocesa el documento.',
+      );
+    }
     try {
-      const companyKey = await this.keys.getGeminiKey(doc.company_id);
-      sections = await this.ocr.transcribe(buffer, mimeType, companyKey, {
+      sections = await this.ocr.transcribe(buffer, mimeType, geminiKey, {
         companyId: doc.company_id,
         projectId: doc.project_id,
       });

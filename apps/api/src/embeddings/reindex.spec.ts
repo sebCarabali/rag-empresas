@@ -76,7 +76,7 @@ test('reindexa todos los fragmentos y marca el proyecto con el modelo nuevo', as
   const result = await svc.run({ kind: 'reembed', projectId: 'p', model: 'nuevo' });
   assert.equal(result.next, undefined);
   assert.ok(db.chunks.every((c) => c.embedding === '[0.5,0.5]' && c.embedding_model === 'nuevo'));
-  assert.deepEqual(embedCalls[0], { model: 'nuevo', companyId: 'c' });
+  assert.deepEqual(embedCalls[0], { model: 'nuevo', projectId: 'p' });
   assert.equal(db.project.embedding_model, 'nuevo');
   assert.equal(db.project.reindex_status, 'done');
   assert.equal(db.project.reindex_done, 150);

@@ -59,7 +59,7 @@ export const EMBEDDING_MODELS: EmbeddingModel[] = [
     label: 'Multilingual E5 base (local)',
     provider: 'local',
     dimensions: 768,
-    note: 'Gratis, corre en el servidor. Buen español. El primer uso tras un despliegue tarda en cargar.',
+    note: 'Corre en el servidor: no necesita clave ni tiene costo por uso. Buen español.',
     pricePerM: 0,
   },
   {
@@ -67,7 +67,7 @@ export const EMBEDDING_MODELS: EmbeddingModel[] = [
     label: 'Gemini Embedding',
     provider: 'gemini',
     dimensions: 768,
-    note: 'Muy buena calidad multilingüe. Usa la clave de Gemini (de la empresa o de la plataforma).',
+    note: 'Muy buena calidad multilingüe. Usa la clave de Gemini del asistente.',
     pricePerM: 0.15,
   },
   {
@@ -75,7 +75,7 @@ export const EMBEDDING_MODELS: EmbeddingModel[] = [
     label: 'OpenAI text-embedding-3-small',
     provider: 'openai',
     dimensions: 1536,
-    note: 'Muy económico. Requiere la clave de OpenAI de la empresa.',
+    note: 'Muy económico. Usa la clave de OpenAI del asistente.',
     pricePerM: 0.02,
   },
   {
@@ -83,7 +83,7 @@ export const EMBEDDING_MODELS: EmbeddingModel[] = [
     label: 'OpenAI text-embedding-3-large',
     provider: 'openai',
     dimensions: 3072,
-    note: 'La mejor calidad de OpenAI. Requiere la clave de OpenAI de la empresa.',
+    note: 'La mejor calidad de OpenAI. Usa la clave de OpenAI del asistente.',
     pricePerM: 0.13,
   },
 ];
@@ -104,7 +104,7 @@ export interface ModelSettings {
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   llmProvider: 'gemini',
   llmModel: null,
-  llmFallback: 'groq',
+  llmFallback: 'none',
   llmFallbackModel: null,
   embeddingModel: null,
 };

@@ -50,7 +50,7 @@ function fakeGemini(rounds: Array<Array<Record<string, unknown>>>) {
   const { AppConfig } = require('../config/app-config');
   const service = new GeminiService(new AppConfig());
   const requests: Array<Record<string, unknown>> = [];
-  (service as unknown as { ai: unknown }).ai = {
+  const fake = {
     models: {
       generateContentStream: async (req: Record<string, unknown>) => {
         requests.push(structuredClone({ ...req, config: { ...(req.config as object), abortSignal: undefined } }));
@@ -61,6 +61,7 @@ function fakeGemini(rounds: Array<Array<Record<string, unknown>>>) {
       },
     },
   };
+  (service as unknown as { client: () => unknown }).client = () => fake;
   return { service, requests };
 }
 
@@ -72,6 +73,7 @@ test('Gemini: ejecuta la herramienta, devuelve el resultado y luego responde', a
   const executed: string[] = [];
   const events: GeminiEvent[] = [];
   for await (const e of service.run('sys', [{ role: 'user', content: 'cuántas' }], {
+    apiKey: 'k',
     tools: [{ name: 'contar_productos' }],
     execute: async (name) => {
       executed.push(name);
@@ -95,6 +97,7 @@ test('Gemini: tras el máximo de rondas fuerza la respuesta sin herramientas', a
   const { service, requests } = fakeGemini([call, call, call, call, [{ text: 'listo' }]]);
   let text = '';
   for await (const e of service.run('sys', [{ role: 'user', content: 'x' }], {
+    apiKey: 'k',
     tools: [{ name: 'contar_productos' }],
     execute: async () => ({ total: 1 }),
   })) {
@@ -115,6 +118,7 @@ test('Gemini: si termina sin texto, insiste una vez y luego falla para que respo
   const ok = fakeGemini([call, [], [{ text: 'Hay 166 telas.' }]]);
   let text = '';
   for await (const e of ok.service.run('sys', [{ role: 'user', content: 'x' }], {
+    apiKey: 'k',
     tools: [{ name: 'contar_productos' }],
     execute: async () => ({ total: 166 }),
   })) {
@@ -125,14 +129,14 @@ test('Gemini: si termina sin texto, insiste una vez y luego falla para que respo
 
   const empty = fakeGemini([[], []]);
   await assert.rejects(async () => {
-    for await (const _ of empty.service.run('sys', [{ role: 'user', content: 'x' }])) void _;
+    for await (const _ of empty.service.run('sys', [{ role: 'user', content: 'x' }], { apiKey: 'k' })) void _;
   }, /no generó texto/);
 });
 
 test('Gemini: no reenvía el texto de "pensamiento" al usuario', async () => {
   const { service } = fakeGemini([[{ text: 'razonando…', thought: true }, { text: 'respuesta' }]]);
   let text = '';
-  for await (const e of service.run('sys', [{ role: 'user', content: 'x' }])) if (e.type === 'text') text += e.text;
+  for await (const e of service.run('sys', [{ role: 'user', content: 'x' }], { apiKey: 'k' })) if (e.type === 'text') text += e.text;
   assert.equal(text, 'respuesta');
 });
 

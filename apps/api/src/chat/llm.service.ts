@@ -13,7 +13,7 @@ export interface ModelInfo {
   fallback: boolean;
   /** Motivo del cambio, en lenguaje claro. */
   reason?: string;
-  /** De quién es la clave usada: de la empresa o de la plataforma. */
+  /** Siempre 'company': la clave la pone la empresa en el asistente ('platform' solo en registros antiguos). */
   keyOwner?: 'company' | 'platform';
 }
 
@@ -22,7 +22,7 @@ export interface LlmTarget {
   provider: LlmProvider;
   model: string;
   apiKey: string;
-  keyOwner: 'company' | 'platform';
+  keyOwner: 'company';
 }
 
 /** Modelo principal y, opcionalmente, el de respaldo. */
@@ -55,7 +55,7 @@ export function describeFailure(err: unknown, provider: LlmProvider = 'gemini'):
 
 /**
  * Orquesta el modelo principal y el de respaldo elegidos en la configuración
- * del asistente (por defecto, Gemini con respaldo en Groq). Si el principal
+ * del asistente, con las claves que la empresa guardó en él. Si el principal
  * falla o no empieza a responder a tiempo, la misma pregunta —con el mismo
  * contexto y las mismas herramientas— se reintenta con el respaldo.
  */
@@ -68,22 +68,6 @@ export class LlmService {
     private readonly groq: GroqService,
     private readonly config: AppConfig,
   ) {}
-
-  /** Ruta por defecto: Gemini (clave de la empresa o de la plataforma) con respaldo en Groq. */
-  defaultRoute(geminiApiKey?: string | null): LlmRoute {
-    return {
-      primary: {
-        provider: 'gemini',
-        model: this.config.geminiModel,
-        apiKey: geminiApiKey || this.config.geminiApiKey,
-        keyOwner: geminiApiKey ? 'company' : 'platform',
-      },
-      fallback:
-        this.config.llmFallback && this.groq.enabled
-          ? { provider: 'groq', model: this.groq.model, apiKey: this.config.groqApiKey, keyOwner: 'platform' }
-          : null,
-    };
-  }
 
   /** Ejecuta un modelo concreto. */
   private call(
@@ -108,16 +92,13 @@ export class LlmService {
       tools?: FunctionDeclaration[];
       execute?: ToolExecutor;
       signal?: AbortSignal;
-      /** Solo con la ruta por defecto: clave de Gemini de la empresa. */
-      geminiApiKey?: string | null;
-      /** Modelos elegidos en la configuración del asistente. */
-      route?: LlmRoute;
+      /** Modelos elegidos en la configuración del asistente, con sus claves. */
+      route: LlmRoute;
       /** false: si el principal falla, se lanza el error en vez de usar el respaldo. */
       allowFallback?: boolean;
-    } = {},
+    },
   ): AsyncGenerator<LlmEvent> {
-    const route = options.route ?? this.defaultRoute(options.geminiApiKey);
-    const { primary, fallback } = route;
+    const { primary, fallback } = options.route;
     yield { type: 'model', info: { provider: primary.provider, model: primary.model, fallback: false, keyOwner: primary.keyOwner } };
 
     // Señal propia para poder cortar al principal si tarda demasiado en empezar.

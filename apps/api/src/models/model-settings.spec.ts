@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { cacheModelKey, ModelSettingsService, toSettings } from './model-settings.service';
+import { MissingModelKeyError } from './project-keys.service';
 
 const config = {
   geminiModel: 'gemini-base',
@@ -11,42 +12,40 @@ const config = {
   llmFallback: true,
 } as never;
 
-function service(companyKeys: Record<string, string>, platform: Record<string, string>) {
-  const keys = {
-    getKey: async (_c: string, p: string) => companyKeys[p] ?? null,
-    platformKey: (p: string) => platform[p] ?? '',
-  };
+/** Claves guardadas en el asistente (la plataforma no aporta ninguna). */
+function service(projectKeys: Record<string, string>) {
+  const keys = { getKey: async (_p: string, provider: string) => projectKeys[provider] ?? null };
   return new ModelSettingsService({} as never, keys as never, config);
 }
 
-test('toSettings usa los valores por defecto sin fila', () => {
+test('toSettings usa los valores por defecto sin fila (sin respaldo)', () => {
   assert.deepEqual(toSettings(null), {
     llmProvider: 'gemini',
     llmModel: null,
-    llmFallback: 'groq',
+    llmFallback: 'none',
     llmFallbackModel: null,
     embeddingModel: null,
   });
 });
 
-test('ruta: clave de la empresa para el principal y de la plataforma para el respaldo', async () => {
-  const svc = service({ openai: 'sk-empresa' }, { gemini: 'g', groq: 'q' });
-  const route = await svc.route('c', { ...toSettings(null), llmProvider: 'openai', llmModel: 'gpt-x', llmFallback: 'gemini' });
-  assert.deepEqual(route.primary, { provider: 'openai', model: 'gpt-x', apiKey: 'sk-empresa', keyOwner: 'company' });
-  assert.deepEqual(route.fallback, { provider: 'gemini', model: 'gemini-base', apiKey: 'g', keyOwner: 'platform' });
+test('ruta: principal y respaldo con las claves del asistente', async () => {
+  const svc = service({ openai: 'sk-asistente', gemini: 'g-asistente' });
+  const route = await svc.route('p', { ...toSettings(null), llmProvider: 'openai', llmModel: 'gpt-x', llmFallback: 'gemini' });
+  assert.deepEqual(route.primary, { provider: 'openai', model: 'gpt-x', apiKey: 'sk-asistente', keyOwner: 'company' });
+  assert.deepEqual(route.fallback, { provider: 'gemini', model: 'gemini-base', apiKey: 'g-asistente', keyOwner: 'company' });
 });
 
-test('ruta: sin clave del proveedor elegido se usa Gemini; respaldo igual al principal se omite', async () => {
-  const svc = service({}, { gemini: 'g' });
-  const route = await svc.route('c', { ...toSettings(null), llmProvider: 'openai', llmFallback: 'gemini' });
-  assert.equal(route.primary.provider, 'gemini');
-  assert.equal(route.fallback, null);
+test('ruta: sin clave del principal no responde (no hay clave de la plataforma)', async () => {
+  const svc = service({ gemini: 'g' });
+  await assert.rejects(svc.route('p', { ...toSettings(null), llmProvider: 'openai' }), MissingModelKeyError);
+  await assert.rejects(service({}).route('p', toSettings(null)), /no tiene clave de Gemini/);
 });
 
-test('respaldo "none" no agrega modelo de respaldo', async () => {
-  const svc = service({}, { gemini: 'g', groq: 'q' });
-  const route = await svc.route('c', { ...toSettings(null), llmFallback: 'none' });
-  assert.equal(route.fallback, null);
+test('ruta: respaldo sin clave, igual al principal o "none" se omite', async () => {
+  const svc = service({ gemini: 'g' });
+  assert.equal((await svc.route('p', { ...toSettings(null), llmFallback: 'groq' })).fallback, null);
+  assert.equal((await svc.route('p', { ...toSettings(null), llmFallback: 'gemini' })).fallback, null);
+  assert.equal((await svc.route('p', { ...toSettings(null), llmFallback: 'none' })).fallback, null);
 });
 
 test('cacheModelKey conserva el formato anterior para Gemini', () => {

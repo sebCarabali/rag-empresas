@@ -17,7 +17,6 @@ import type { LlmEvent, LlmTarget } from '../chat/llm.service';
 import { LlmService, describeFailure } from '../chat/llm.service';
 import { DEFAULT_CHATBOT } from '../chatbots/chatbots.service';
 import { unwrap } from '../common/supabase-error';
-import { CompanyKeysService } from '../companies/company-keys.service';
 import { AppConfig } from '../config/app-config';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { ReindexService } from '../embeddings/reindex.service';
@@ -32,6 +31,7 @@ import {
   type LlmProvider,
 } from './catalog';
 import { ModelSettingsService, toSettings } from './model-settings.service';
+import { ProjectKeysService } from './project-keys.service';
 
 const MODEL_COLUMNS = 'llm_provider, llm_model, llm_fallback, llm_fallback_model, embedding_model';
 
@@ -80,14 +80,14 @@ class ProviderKeyDto {
 
 /**
  * Modelos del asistente (proveedor de lenguaje, respaldo y embeddings) y
- * claves de API de la empresa para cada proveedor.
+ * claves de API del asistente para cada proveedor.
  */
 @Controller()
 export class ModelsController {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly models: ModelSettingsService,
-    private readonly keys: CompanyKeysService,
+    private readonly keys: ProjectKeysService,
     private readonly llm: LlmService,
     private readonly embeddings: EmbeddingsService,
     private readonly reindex: ReindexService,
@@ -111,7 +111,7 @@ export class ModelsController {
   async get(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
     const { db, project, canEdit } = await this.project(user, projectId);
     const { data } = await db.from('chatbots').select(MODEL_COLUMNS).eq('project_id', projectId).maybeSingle();
-    const keys = await this.models.availability(project.company_id);
+    const keys = await this.models.availability(projectId);
     return {
       canEdit,
       companyId: project.company_id,
@@ -143,17 +143,17 @@ export class ModelsController {
     const { db, project, canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar los modelos');
 
-    const keys = await this.models.availability(project.company_id);
-    const hasKey = (p: LlmProvider) => keys[p].company || keys[p].platform;
+    const keys = await this.models.availability(projectId);
+    const hasKey = (p: LlmProvider) => keys[p].configured;
     if (!hasKey(dto.llmProvider)) {
-      throw new BadRequestException(`Para usar ${PROVIDER_LABEL[dto.llmProvider]} primero guarda la clave de API de la empresa.`);
+      throw new BadRequestException(`Para usar ${PROVIDER_LABEL[dto.llmProvider]} primero guarda su clave de API en este asistente.`);
     }
     if (dto.llmFallback !== 'none' && !hasKey(dto.llmFallback)) {
       throw new BadRequestException(`Para usar ${PROVIDER_LABEL[dto.llmFallback]} como respaldo primero guarda su clave de API.`);
     }
     const emb = dto.embeddingModel ? embeddingModel(dto.embeddingModel) : null;
     if (emb && emb.provider !== 'local' && !hasKey(emb.provider)) {
-      throw new BadRequestException(`El modelo ${emb.label} necesita la clave de ${PROVIDER_LABEL[emb.provider]} de la empresa.`);
+      throw new BadRequestException(`El modelo ${emb.label} necesita la clave de ${PROVIDER_LABEL[emb.provider]} de este asistente.`);
     }
 
     const values = {
@@ -181,7 +181,7 @@ export class ModelsController {
     return this.get(user, projectId);
   }
 
-  /** Prueba un modelo con una pregunta mínima, con las claves de la empresa o de la plataforma. */
+  /** Prueba un modelo con una pregunta mínima, con la clave del asistente. */
   @Post('projects/:projectId/models/test')
   @HttpCode(200)
   async test(
@@ -189,7 +189,7 @@ export class ModelsController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() dto: TestDto,
   ) {
-    const { project, canEdit } = await this.project(user, projectId);
+    const { canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden probar los modelos');
     const started = Date.now();
 
@@ -197,7 +197,7 @@ export class ModelsController {
       const model = dto.model || this.config.embeddingModel;
       if (!embeddingModel(model)) throw new BadRequestException('Modelo de embeddings no disponible');
       try {
-        const v = await this.embeddings.embedQuery('¿Qué productos tienen?', { model, companyId: project.company_id });
+        const v = await this.embeddings.embedQuery('¿Qué productos tienen?', { model, projectId });
         return { ok: true, ms: Date.now() - started, detail: `${v.length} dimensiones` };
       } catch (err) {
         return { ok: false, ms: Date.now() - started, detail: (err as Error).message.slice(0, 300) };
@@ -205,8 +205,8 @@ export class ModelsController {
     }
 
     const provider = dto.provider ?? 'gemini';
-    const target: LlmTarget | null = await this.models.target(project.company_id, provider, dto.model ?? null);
-    if (!target) return { ok: false, ms: 0, detail: `No hay clave de ${PROVIDER_LABEL[provider]}` };
+    const target: LlmTarget | null = await this.models.target(projectId, provider, dto.model ?? null);
+    if (!target) return { ok: false, ms: 0, detail: `Este asistente no tiene clave de ${PROVIDER_LABEL[provider]}` };
     const signal = AbortSignal.timeout(30_000);
     let answer = '';
     try {
@@ -221,7 +221,6 @@ export class ModelsController {
         ms: Date.now() - started,
         detail: answer.trim().slice(0, 200) || 'El modelo no devolvió texto',
         model: target.model,
-        keyOwner: target.keyOwner,
       };
     } catch (err) {
       return {
@@ -233,42 +232,46 @@ export class ModelsController {
     }
   }
 
-  /** Guarda la clave de un proveedor (Gemini, OpenAI o Groq) en el Vault, tras comprobar que funciona. */
-  @Put('companies/:companyId/provider-keys/:provider')
+  /** Guarda la clave de un proveedor (Gemini, OpenAI o Groq) del asistente en el Vault, tras comprobar que funciona. */
+  @Put('projects/:projectId/provider-keys/:provider')
   @HttpCode(204)
   async setKey(
     @CurrentUser() user: AuthUser,
-    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('provider') provider: string,
     @Body() dto: ProviderKeyDto,
   ) {
     const p = this.provider(provider);
-    const db = this.supabase.forUser(user.accessToken);
-    const canEdit = unwrap(await db.rpc('has_company_role', { p_company_id: companyId, p_roles: ['owner', 'admin'] }));
+    const { db, canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar las claves');
     await this.keys.validateKey(p, dto.apiKey.trim());
     unwrap(
       await db
-        .rpc('set_company_provider_key', { p_company_id: companyId, p_provider: p, p_key: dto.apiKey.trim() })
+        .rpc('set_project_provider_key', { p_project_id: projectId, p_provider: p, p_key: dto.apiKey.trim() })
         .then((r) => ({ ...r, data: true })),
     );
-    this.keys.invalidate(companyId);
+    this.keys.invalidate(projectId);
   }
 
-  /** Elimina la clave de un proveedor: se vuelve a usar la de la plataforma, si existe. */
-  @Delete('companies/:companyId/provider-keys/:provider')
+  /** Elimina la clave de un proveedor del asistente. */
+  @Delete('projects/:projectId/provider-keys/:provider')
   @HttpCode(204)
   async deleteKey(
     @CurrentUser() user: AuthUser,
-    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('provider') provider: string,
   ) {
     const p = this.provider(provider);
-    const db = this.supabase.forUser(user.accessToken);
+    const { db, canEdit } = await this.project(user, projectId);
+    if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar las claves');
+    const settings = await this.models.get(projectId);
+    if (settings.llmProvider === p) {
+      throw new BadRequestException(`${PROVIDER_LABEL[p]} es el modelo principal de este asistente: elige otro proveedor antes de borrar su clave.`);
+    }
     unwrap(
-      await db.rpc('delete_company_provider_key', { p_company_id: companyId, p_provider: p }).then((r) => ({ ...r, data: true })),
+      await db.rpc('delete_project_provider_key', { p_project_id: projectId, p_provider: p }).then((r) => ({ ...r, data: true })),
     );
-    this.keys.invalidate(companyId);
+    this.keys.invalidate(projectId);
   }
 
   private provider(value: string): LlmProvider {

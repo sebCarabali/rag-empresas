@@ -10,6 +10,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
+import { MissingModelKeyError } from '../models/project-keys.service';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import type { Response } from 'express';
 import { Public } from '../auth/auth.guard';
@@ -130,7 +131,7 @@ export class PublicApiController {
     } catch (err) {
       if (!abort.signal.aborted) {
         this.logger.error(`API ${ctx.keyId}: ${(err as Error).message}`);
-        emit({ type: 'error', message: 'No se pudo generar la respuesta.' });
+        emit({ type: 'error', message: err instanceof MissingModelKeyError ? err.message : 'No se pudo generar la respuesta.' });
       }
     } finally {
       res.end();
