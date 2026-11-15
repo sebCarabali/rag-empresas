@@ -358,7 +358,7 @@ function MessageBubble({ message, color, botName }: { message: ChatMessage; colo
             {(info || message.cached) && (
               <span>
                 {info &&
-                  `${modelLabel(info)}${info.fallback ? ' (respaldo)' : ''}${info.keyOwner === 'company' ? ' · clave de la empresa' : ''}`}
+                  `${modelLabel(info)}${info.fallback ? ' (respaldo)' : ''}`}
                 {info && message.cached && ' · '}
                 {message.cached &&
                   (message.cacheMatch?.kind === 'semantic'

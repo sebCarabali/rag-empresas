@@ -14,7 +14,7 @@ process.env.GEMINI_API_KEY ??= 'x';
 const { AppConfig } = require('../config/app-config');
 
 function config(overrides: Record<string, unknown> = {}) {
-  return Object.assign(new AppConfig(), { groqApiKey: 'gsk_test', geminiFirstEventTimeoutMs: 1000, ...overrides });
+  return Object.assign(new AppConfig(), { geminiFirstEventTimeoutMs: 1000, ...overrides });
 }
 
 function fakeProvider(events: GeminiEvent[], failWith?: Error, hangMs = 0) {
@@ -41,14 +41,19 @@ async function collect(gen: AsyncGenerator<LlmEvent>) {
   return out;
 }
 
+const ROUTE = {
+  primary: { provider: 'gemini' as const, model: 'gemini-test', apiKey: 'g', keyOwner: 'company' as const },
+  fallback: { provider: 'groq' as const, model: 'openai/gpt-oss-120b', apiKey: 'q', keyOwner: 'company' as const },
+};
+
 const text = (events: LlmEvent[]) =>
   events.filter((e) => e.type === 'text').map((e) => (e as { text: string }).text).join('');
 
 test('sin errores responde Gemini y no cambia de modelo', async () => {
   const cfg = config();
   const llm = new LlmService(fakeProvider([{ type: 'text', text: 'hola' }]) as never, new GroqService(cfg), cfg);
-  const events = await collect(llm.run('s', []));
-  assert.deepEqual(events[0], { type: 'model', info: { provider: 'gemini', model: cfg.geminiModel, fallback: false, keyOwner: 'platform' } });
+  const events = await collect(llm.run('s', [], { route: ROUTE }));
+  assert.deepEqual(events[0], { type: 'model', info: { provider: 'gemini', model: 'gemini-test', fallback: false, keyOwner: 'company' } });
   assert.equal(text(events), 'hola');
 });
 
@@ -57,7 +62,7 @@ test('si Gemini falla, responde Groq e informa el motivo', async () => {
   const quota = Object.assign(new Error('RESOURCE_EXHAUSTED: quota exceeded'), { status: 429 });
   const groq = Object.assign(fakeProvider([{ type: 'text', text: 'respuesta de groq' }]), { enabled: true, model: 'openai/gpt-oss-120b' });
   const llm = new LlmService(fakeProvider([], quota) as never, groq as never, cfg);
-  const events = await collect(llm.run('s', []));
+  const events = await collect(llm.run('s', [], { route: ROUTE }));
   const models = events.filter((e) => e.type === 'model');
   assert.equal(models.length, 2);
   assert.deepEqual((models[1] as { info: unknown }).info, {
@@ -65,7 +70,7 @@ test('si Gemini falla, responde Groq e informa el motivo', async () => {
     model: 'openai/gpt-oss-120b',
     fallback: true,
     reason: 'Gemini agotó su cuota',
-    keyOwner: 'platform',
+    keyOwner: 'company',
   });
   assert.equal(text(events), 'respuesta de groq');
 });
@@ -74,7 +79,7 @@ test('si Gemini falla a mitad de la respuesta, se descarta lo parcial', async ()
   const cfg = config();
   const groq = Object.assign(fakeProvider([{ type: 'text', text: 'completa' }]), { enabled: true, model: 'g' });
   const llm = new LlmService(fakeProvider([{ type: 'text', text: 'parcial…' }], new Error('503 UNAVAILABLE')) as never, groq as never, cfg);
-  const events = await collect(llm.run('s', []));
+  const events = await collect(llm.run('s', [], { route: ROUTE }));
   const types = events.map((e) => e.type);
   assert.deepEqual(types, ['model', 'text', 'reset', 'model', 'text']);
 });
@@ -83,7 +88,7 @@ test('si Gemini no empieza a responder a tiempo, pasa a Groq', async () => {
   const cfg = config({ geminiFirstEventTimeoutMs: 50 });
   const groq = Object.assign(fakeProvider([{ type: 'text', text: 'rápido' }]), { enabled: true, model: 'g' });
   const llm = new LlmService(fakeProvider([{ type: 'text', text: 'lento' }], undefined, 5000) as never, groq as never, cfg);
-  const events = await collect(llm.run('s', []));
+  const events = await collect(llm.run('s', [], { route: ROUTE }));
   assert.equal(text(events), 'rápido');
   assert.equal((events[1] as { info: { reason: string } }).info.reason, 'Gemini no respondió a tiempo');
 });
@@ -94,13 +99,13 @@ test('si el usuario cancela, no se usa el respaldo', async () => {
   abort.abort();
   const groq = Object.assign(fakeProvider([{ type: 'text', text: 'x' }]), { enabled: true, model: 'g' });
   const llm = new LlmService(fakeProvider([], new Error('aborted')) as never, groq as never, cfg);
-  await assert.rejects(collect(llm.run('s', [], { signal: abort.signal })));
+  await assert.rejects(collect(llm.run('s', [], { route: ROUTE, signal: abort.signal })));
 });
 
-test('sin clave de Groq, el error de Gemini se propaga', async () => {
-  const cfg = config({ groqApiKey: '' });
+test('sin respaldo configurado, el error del principal se propaga', async () => {
+  const cfg = config();
   const llm = new LlmService(fakeProvider([], new Error('500 internal')) as never, new GroqService(cfg), cfg);
-  await assert.rejects(collect(llm.run('s', [])));
+  await assert.rejects(collect(llm.run('s', [], { route: { ...ROUTE, fallback: null } })));
 });
 
 test('describeFailure traduce los errores habituales', () => {
@@ -149,6 +154,7 @@ test('Groq: acumula la llamada a herramienta, la ejecuta y luego responde', asyn
     const executed: Array<[string, unknown]> = [];
     let out = '';
     for await (const e of groq.run('sys', [{ role: 'user', content: 'cuántas' }], {
+      target: { provider: 'groq', model: 'openai/gpt-oss-120b', apiKey: 'q' },
       tools: [{ name: 'contar_productos', description: 'd', parametersJsonSchema: { type: 'object' } }],
       execute: async (name, args) => {
         executed.push([name, args]);
@@ -172,7 +178,7 @@ test('con allowFallback=false no se usa Groq aunque haya clave', async () => {
   const cfg = config();
   const groq = Object.assign(fakeProvider([{ type: 'text', text: 'groq' }]), { enabled: true, model: 'g' });
   const llm = new LlmService(fakeProvider([], new Error('503 UNAVAILABLE')) as never, groq as never, cfg);
-  await assert.rejects(collect(llm.run('s', [], { allowFallback: false })));
+  await assert.rejects(collect(llm.run('s', [], { route: ROUTE, allowFallback: false })));
 });
 
 test('ruta elegida: OpenAI principal con respaldo en Gemini', async () => {
@@ -197,7 +203,7 @@ test('ruta elegida: OpenAI principal con respaldo en Gemini', async () => {
     llm.run('s', [], {
       route: {
         primary: { provider: 'openai', model: 'gpt-5.4-mini', apiKey: 'sk-empresa', keyOwner: 'company' },
-        fallback: { provider: 'gemini', model: 'gemini-3.5-flash', apiKey: 'g-plataforma', keyOwner: 'platform' },
+        fallback: { provider: 'gemini', model: 'gemini-3.5-flash', apiKey: 'g-plataforma', keyOwner: 'company' },
       },
     }),
   );

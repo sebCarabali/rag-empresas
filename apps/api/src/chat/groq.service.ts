@@ -31,26 +31,18 @@ export interface OpenAiTarget {
 /**
  * Modelos con API compatible con OpenAI (Groq y OpenAI). Misma interfaz que
  * GeminiService: streaming de texto y llamadas a las herramientas del catálogo.
- * Sin "target" usa Groq con la clave y el modelo de la plataforma.
+ * La clave es siempre la del asistente.
  */
 @Injectable()
 export class GroqService {
   constructor(private readonly config: AppConfig) {}
 
-  get enabled(): boolean {
-    return Boolean(this.config.groqApiKey);
-  }
-
-  get model(): string {
-    return this.config.groqModel;
-  }
-
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; target?: OpenAiTarget } = {},
+    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; target: OpenAiTarget },
   ): AsyncGenerator<GeminiEvent> {
-    const target: OpenAiTarget = options.target ?? { provider: 'groq', model: this.config.groqModel, apiKey: this.config.groqApiKey };
+    const { target } = options;
     const label = target.provider === 'openai' ? 'OpenAI' : 'Groq';
     const messages: OpenAiMessage[] = [
       { role: 'system', content: systemInstruction },

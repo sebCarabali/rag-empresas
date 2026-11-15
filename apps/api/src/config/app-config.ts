@@ -48,16 +48,14 @@ export class AppConfig {
   /** Clave service_role. Solo la usa el worker y operaciones de Storage del servidor. */
   readonly supabaseServiceRoleKey = assertServiceKey(required('SUPABASE_SERVICE_ROLE_KEY').trim());
 
-  readonly geminiApiKey = required('GEMINI_API_KEY').trim();
   readonly geminiModel = optional('GEMINI_MODEL', 'gemini-3.5-flash');
 
-  /** Modelo de respaldo en Groq si Gemini falla. Sin clave (GROQ_KEY o GROQ_API_KEY) no hay respaldo. */
-  readonly groqApiKey = (process.env.GROQ_KEY || process.env.GROQ_API_KEY || '').trim();
+  /** Modelo por defecto de Groq (la clave la pone cada asistente). */
   readonly groqModel = optional('GROQ_MODEL', 'openai/gpt-oss-120b');
+  /** false desactiva el modelo de respaldo en toda la plataforma. */
   readonly llmFallback = optional('LLM_FALLBACK', 'true') === 'true';
 
-  /** OpenAI: solo con clave de la plataforma (OPENAI_API_KEY) o de la empresa. */
-  readonly openaiApiKey = (process.env.OPENAI_API_KEY ?? '').trim();
+  /** Modelo por defecto de OpenAI (la clave la pone cada asistente). */
   readonly openaiModel = optional('OPENAI_MODEL', 'gpt-5.4-mini');
   /** Si Gemini no empieza a responder en este tiempo, se pasa a Groq. */
   readonly geminiFirstEventTimeoutMs = Number(optional('GEMINI_FIRST_EVENT_TIMEOUT_MS', '25000'));

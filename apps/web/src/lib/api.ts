@@ -95,11 +95,10 @@ export interface ProviderOption {
   label: string;
   suggestions: Array<{ id: string; note: string }>;
   price: { input: number; output: number };
-  /** La empresa guardó su clave (se muestran los últimos 4 caracteres). */
-  company: boolean;
+  /** El asistente tiene clave de este proveedor (se muestran solo los últimos 4 caracteres). */
+  configured: boolean;
   last4: string | null;
-  /** Hay clave de la plataforma. */
-  platform: boolean;
+  updatedAt: string | null;
 }
 
 export interface EmbeddingOption {
@@ -126,7 +125,6 @@ export interface ModelTestResult {
   ms: number;
   detail: string;
   model?: string;
-  keyOwner?: 'company' | 'platform';
 }
 
 export interface ModelInfo {
@@ -297,11 +295,6 @@ export interface Chatbot {
   widget_auth: 'public' | 'token';
 }
 
-export interface CompanySettings {
-  canEdit: boolean;
-  gemini: { configured: boolean; last4: string | null; updatedAt: string | null };
-}
-
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -419,19 +412,14 @@ export const api = {
     request<Chatbot>('PUT', `/projects/${projectId}/chatbot`, values),
   rotateChatbotKey: (projectId: string) => request<Chatbot>('POST', `/projects/${projectId}/chatbot/rotate-key`, {}),
 
-  companySettings: (companyId: string) => request<CompanySettings>('GET', `/companies/${companyId}/settings`),
-  setGeminiKey: (companyId: string, apiKey: string) =>
-    request<void>('PUT', `/companies/${companyId}/gemini-key`, { apiKey }),
-  deleteGeminiKey: (companyId: string) => request<void>('DELETE', `/companies/${companyId}/gemini-key`),
-
   models: (projectId: string) => request<ModelsConfig>('GET', `/projects/${projectId}/models`),
   saveModels: (projectId: string, settings: ModelSettings) => request<ModelsConfig>('PUT', `/projects/${projectId}/models`, settings),
   testModel: (projectId: string, body: { kind: 'llm' | 'embedding'; provider?: LlmProvider; model?: string | null }) =>
     request<ModelTestResult>('POST', `/projects/${projectId}/models/test`, body),
-  setProviderKey: (companyId: string, provider: LlmProvider, apiKey: string) =>
-    request<void>('PUT', `/companies/${companyId}/provider-keys/${provider}`, { apiKey }),
-  deleteProviderKey: (companyId: string, provider: LlmProvider) =>
-    request<void>('DELETE', `/companies/${companyId}/provider-keys/${provider}`),
+  setProviderKey: (projectId: string, provider: LlmProvider, apiKey: string) =>
+    request<void>('PUT', `/projects/${projectId}/provider-keys/${provider}`, { apiKey }),
+  deleteProviderKey: (projectId: string, provider: LlmProvider) =>
+    request<void>('DELETE', `/projects/${projectId}/provider-keys/${provider}`),
 
   conversations: (projectId: string) => request<Conversation[]>('GET', `/projects/${projectId}/conversations`),
   createConversation: (projectId: string) =>

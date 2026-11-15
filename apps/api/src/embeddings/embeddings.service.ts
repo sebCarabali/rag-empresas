@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { geminiClient } from '../chat/gemini.service';
-import { CompanyKeysService } from '../companies/company-keys.service';
+import { ProjectKeysService } from '../models/project-keys.service';
 import { AppConfig } from '../config/app-config';
 import { embeddingModel, OPENAI_COMPATIBLE_BASE, type EmbeddingModel } from '../models/catalog';
 
@@ -18,16 +18,16 @@ const extractors = new Map<string, Promise<Extractor>>();
 /** Para qué se pide el embedding (algunos modelos lo usan para optimizarlo). */
 export type EmbedKind = 'query' | 'passage';
 
-/** Con qué modelo y para qué empresa (las claves de API son de la empresa). */
+/** Con qué modelo y para qué proyecto (los modelos por API usan la clave del asistente). */
 export interface EmbedOptions {
   model?: string | null;
-  companyId?: string | null;
+  projectId?: string | null;
 }
 
 /**
  * Embeddings locales (Transformers.js + ONNX, familia E5 con prefijos
- * "query:"/"passage:") o por API (Gemini, OpenAI), según el modelo elegido en
- * la configuración del asistente.
+ * "query:"/"passage:"; no necesitan clave) o por API (Gemini, OpenAI, con la
+ * clave del asistente), según el modelo elegido en la configuración.
  */
 @Injectable()
 export class EmbeddingsService {
@@ -35,7 +35,7 @@ export class EmbeddingsService {
 
   constructor(
     private readonly config: AppConfig,
-    private readonly keys: CompanyKeysService,
+    private readonly keys: ProjectKeysService,
   ) {}
 
   /** Modelo efectivo: el elegido o el de la plataforma. */
@@ -56,8 +56,8 @@ export class EmbeddingsService {
     const id = this.modelId(options.model);
     const spec = embeddingModel(id) ?? localSpec(id);
     let vectors: number[][];
-    if (spec.provider === 'gemini') vectors = await this.gemini(spec, texts, kind, options.companyId);
-    else if (spec.provider === 'openai') vectors = await this.openai(spec, texts, options.companyId);
+    if (spec.provider === 'gemini') vectors = await this.gemini(spec, texts, kind, await this.apiKey(options, 'gemini'));
+    else if (spec.provider === 'openai') vectors = await this.openai(spec, texts, await this.apiKey(options, 'openai'));
     else vectors = await this.local(id, texts, kind);
     return check(vectors, spec);
   }
@@ -71,8 +71,13 @@ export class EmbeddingsService {
     return output.tolist();
   }
 
-  private async gemini(spec: EmbeddingModel, texts: string[], kind: EmbedKind, companyId?: string | null): Promise<number[][]> {
-    const apiKey = (companyId && (await this.keys.getKey(companyId, 'gemini'))) || this.config.geminiApiKey;
+  /** Clave del asistente para los embeddings por API. */
+  private apiKey(options: EmbedOptions, provider: 'gemini' | 'openai'): Promise<string> {
+    if (!options.projectId) throw new Error('Falta el proyecto para usar un modelo de embeddings por API');
+    return this.keys.requireKey(options.projectId, provider, 'calcular los embeddings');
+  }
+
+  private async gemini(spec: EmbeddingModel, texts: string[], kind: EmbedKind, apiKey: string): Promise<number[][]> {
     const response = await geminiClient(apiKey).models.embedContent({
       model: spec.id,
       contents: texts,
@@ -85,9 +90,7 @@ export class EmbeddingsService {
     return (response.embeddings ?? []).map((e) => normalize(e.values ?? []));
   }
 
-  private async openai(spec: EmbeddingModel, texts: string[], companyId?: string | null): Promise<number[][]> {
-    const apiKey = (companyId && (await this.keys.getKey(companyId, 'openai'))) || this.config.openaiApiKey;
-    if (!apiKey) throw new Error('Falta la clave de OpenAI de la empresa para calcular los embeddings');
+  private async openai(spec: EmbeddingModel, texts: string[], apiKey: string): Promise<number[][]> {
     const res = await fetch(`${OPENAI_COMPATIBLE_BASE.openai}/embeddings`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

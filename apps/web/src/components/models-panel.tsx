@@ -22,15 +22,14 @@ const KEY_CONSOLE: Record<LlmProvider, string> = {
 const PROVIDER_BLURB: Record<LlmProvider, string> = {
   gemini: 'Buena relación calidad/precio y uso de herramientas del catálogo.',
   groq: 'Respuestas muy rápidas con modelos abiertos.',
-  openai: 'Modelos GPT. Requiere la clave de OpenAI de la empresa.',
+  openai: 'Modelos GPT de OpenAI.',
 };
 
-const hasKey = (p?: ProviderOption) => Boolean(p && (p.company || p.platform));
+const hasKey = (p?: ProviderOption) => Boolean(p?.configured);
 
 function KeyBadge({ p }: { p: ProviderOption }) {
-  if (p.company) return <Badge tone="ok">Clave de la empresa ···{p.last4}</Badge>;
-  if (p.platform) return <Badge tone="neutral">Clave de la plataforma</Badge>;
-  return <Badge tone="warn">Falta la clave</Badge>;
+  if (p.configured) return <Badge tone="ok">Clave ···{p.last4}</Badge>;
+  return <Badge tone="warn">Sin clave</Badge>;
 }
 
 function TestLine({ result }: { result: ModelTestResult | null }) {
@@ -40,7 +39,6 @@ function TestLine({ result }: { result: ModelTestResult | null }) {
       {result.ok ? '✓ ' : '✗ '}
       {result.detail}
       {result.ms ? ` · ${(result.ms / 1000).toFixed(1)} s` : ''}
-      {result.keyOwner ? ` · clave de ${result.keyOwner === 'company' ? 'la empresa' : 'la plataforma'}` : ''}
     </p>
   );
 }
@@ -108,7 +106,7 @@ function ModelPicker({
   );
 }
 
-function ProviderKeys({ config, onChanged }: { config: ModelsConfig; onChanged: () => Promise<void> }) {
+function ProviderKeys({ projectId, config, onChanged }: { projectId: string; config: ModelsConfig; onChanged: () => Promise<void> }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +117,7 @@ function ProviderKeys({ config, onChanged }: { config: ModelsConfig; onChanged: 
     setBusy(p);
     setError(null);
     try {
-      await api.setProviderKey(config.companyId, p, key);
+      await api.setProviderKey(projectId, p, key);
       setDrafts((d) => ({ ...d, [p]: '' }));
       await onChanged();
     } catch (e) {
@@ -130,11 +128,11 @@ function ProviderKeys({ config, onChanged }: { config: ModelsConfig; onChanged: 
   }
 
   async function remove(p: LlmProvider) {
-    if (!confirm(`¿Eliminar la clave de ${PROVIDER_LABEL[p]} de la empresa? Se usará la de la plataforma si existe.`)) return;
+    if (!confirm(`¿Eliminar la clave de ${PROVIDER_LABEL[p]} de este asistente? Lo que dependa de ella (respaldo, embeddings, OCR o descripciones web) dejará de funcionar.`)) return;
     setBusy(p);
     setError(null);
     try {
-      await api.deleteProviderKey(config.companyId, p);
+      await api.deleteProviderKey(projectId, p);
       await onChanged();
     } catch (e) {
       setError((e as Error).message);
@@ -146,10 +144,11 @@ function ProviderKeys({ config, onChanged }: { config: ModelsConfig; onChanged: 
   return (
     <Card className="space-y-4">
       <div>
-        <h2 className="font-semibold">Claves de API de la empresa</h2>
+        <h2 className="font-semibold">Claves de API de este asistente</h2>
         <p className="mt-1 text-sm text-muted">
-          Se guardan cifradas (Supabase Vault) y nunca se muestran de nuevo; solo sus últimos 4 caracteres. Sirven para todos los proyectos de
-          la empresa y su consumo se cobra a tu cuenta del proveedor.
+          La plataforma no aporta claves: el asistente usa solo las que guardes aquí, y el consumo se cobra a tu cuenta de cada proveedor. Se
+          verifican con el proveedor, se guardan cifradas (Supabase Vault) y nunca se vuelven a mostrar; solo sus últimos 4 caracteres. La de
+          Gemini también se usa para leer PDF escaneados e imágenes (OCR) y para las descripciones web del catálogo.
         </p>
       </div>
       <ErrorText>{error}</ErrorText>
@@ -171,14 +170,14 @@ function ProviderKeys({ config, onChanged }: { config: ModelsConfig; onChanged: 
                   autoComplete="off"
                   value={drafts[p.id] ?? ''}
                   onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                  placeholder={p.company ? 'Reemplazar la clave…' : 'Pega la clave…'}
+                  placeholder={p.configured ? 'Reemplazar la clave…' : 'Pega la clave…'}
                   aria-label={`Clave de ${p.label}`}
                   className="h-9 min-w-0 flex-1 rounded-[9px] border border-line-strong px-3 font-mono text-[13px] outline-none focus:border-brand"
                 />
                 <Button type="button" variant="secondary" onClick={() => void save(p.id)} disabled={busy === p.id || !drafts[p.id]?.trim()}>
                   {busy === p.id ? 'Verificando…' : 'Guardar'}
                 </Button>
-                {p.company && (
+                {p.configured && (
                   <Button type="button" variant="ghost" onClick={() => void remove(p.id)} disabled={busy === p.id}>
                     Eliminar
                   </Button>
@@ -325,6 +324,14 @@ export function ModelsPanel({ projectId }: { projectId: string }) {
       {!config.canEdit && (
         <p className="rounded-[10px] bg-canvas px-3.5 py-2.5 text-sm text-muted">Solo owner o admin pueden cambiar los modelos.</p>
       )}
+      {!hasKey(provider(config.settings.llmProvider)) && (
+        <p className="rounded-[10px] border border-amber-200 bg-warn-soft px-3.5 py-2.5 text-sm text-[#6b3d00]">
+          Este asistente todavía no puede responder: guarda la clave de {PROVIDER_LABEL[config.settings.llmProvider]} (o de otro proveedor y
+          elígelo como modelo de lenguaje).
+        </p>
+      )}
+
+      <ProviderKeys projectId={projectId} config={config} onChanged={load} />
 
       <Card className="space-y-5">
         <div>
@@ -390,8 +397,8 @@ export function ModelsPanel({ projectId }: { projectId: string }) {
         <div>
           <h2 className="font-semibold">Modelo de respaldo</h2>
           <p className="mt-1 text-sm text-muted">
-            Responde solo si el principal falla o no empieza a responder a tiempo. Sus respuestas quedan como provisionales en la caché: la
-            próxima vez se intenta de nuevo con el principal.
+            Responde solo si el principal falla o no empieza a responder a tiempo (necesita su propia clave guardada arriba). Sus respuestas
+            quedan como provisionales en la caché: la próxima vez se intenta de nuevo con el principal.
           </p>
         </div>
         {!config.defaults.fallbackEnabled && (
@@ -496,7 +503,6 @@ export function ModelsPanel({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      <ProviderKeys config={config} onChanged={load} />
     </div>
   );
 }
