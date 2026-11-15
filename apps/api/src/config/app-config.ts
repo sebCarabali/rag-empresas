@@ -55,16 +55,18 @@ export class AppConfig {
   readonly groqApiKey = (process.env.GROQ_KEY || process.env.GROQ_API_KEY || '').trim();
   readonly groqModel = optional('GROQ_MODEL', 'openai/gpt-oss-120b');
   readonly llmFallback = optional('LLM_FALLBACK', 'true') === 'true';
+
+  /** OpenAI: solo con clave de la plataforma (OPENAI_API_KEY) o de la empresa. */
+  readonly openaiApiKey = (process.env.OPENAI_API_KEY ?? '').trim();
+  readonly openaiModel = optional('OPENAI_MODEL', 'gpt-5.4-mini');
   /** Si Gemini no empieza a responder en este tiempo, se pasa a Groq. */
   readonly geminiFirstEventTimeoutMs = Number(optional('GEMINI_FIRST_EVENT_TIMEOUT_MS', '25000'));
 
   /**
-   * Modelo de embeddings (Transformers.js, familia E5: usa prefijos query:/passage:).
-   * Cambiarlo exige reindexar: ver README, "Cambiar el modelo de embeddings".
+   * Modelo de embeddings por defecto de los proyectos (cada asistente puede elegir
+   * otro en «Modelos»). Cambiarlo reindexa los proyectos que usan el valor por defecto.
    */
-  readonly embeddingModel = optional('EMBEDDING_MODEL', 'Xenova/multilingual-e5-small');
-  /** Dimensión del vector: debe coincidir con document_chunks.embedding (384 small, 768 base, 1024 large). */
-  readonly embeddingDimensions = Number(optional('EMBEDDING_DIMENSIONS', '384'));
+  readonly embeddingModel = optional('EMBEDDING_MODEL', 'Xenova/multilingual-e5-base');
   /** Precisión del modelo de embeddings: q8 (cuantizado, rápido) o fp32. */
   readonly embeddingDtype = optional('EMBEDDING_DTYPE', 'q8');
 
@@ -136,6 +138,11 @@ export class AppConfig {
     groq: {
       input: Number(optional('GROQ_PRICE_INPUT_PER_M', '0.15')),
       output: Number(optional('GROQ_PRICE_OUTPUT_PER_M', '0.60')),
+    },
+    /** Por defecto, gpt-5.4-mini. */
+    openai: {
+      input: Number(optional('OPENAI_PRICE_INPUT_PER_M', '0.75')),
+      output: Number(optional('OPENAI_PRICE_OUTPUT_PER_M', '4.50')),
     },
   };
 }

@@ -11,6 +11,7 @@ import { EvalsController } from './evals/evals.controller';
 import { FeedbackController } from './chat/feedback.controller';
 import { UsageController } from './usage/usage.controller';
 import { ReindexController } from './embeddings/reindex.controller';
+import { ModelsController } from './models/models.controller';
 import { ApiKeysController } from './api-keys/api-keys.controller';
 import { PublicApiController } from './api-keys/public-api.controller';
 import { HealthController } from './health.controller';
@@ -20,7 +21,7 @@ import { CoreModule } from './supabase/supabase.module';
 
 @Module({
   imports: [CoreModule, IngestionModule],
-  controllers: [HealthController, CompaniesController, ProjectsController, DocumentsController, ChatController, EnrichmentsController, ChatbotsController, WidgetController, EvalsController, FeedbackController, UsageController, ApiKeysController, PublicApiController, ReindexController],
+  controllers: [HealthController, CompaniesController, ProjectsController, DocumentsController, ChatController, EnrichmentsController, ChatbotsController, WidgetController, EvalsController, FeedbackController, UsageController, ApiKeysController, PublicApiController, ReindexController, ModelsController],
   providers: [{ provide: APP_GUARD, useClass: SupabaseAuthGuard }],
 })
 export class AppModule {}

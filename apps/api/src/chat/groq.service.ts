@@ -3,7 +3,7 @@ import type { FunctionDeclaration } from '@google/genai';
 import { AppConfig } from '../config/app-config';
 import type { ChatTurn, GeminiEvent, ToolExecutor } from './gemini.service';
 
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+import { OPENAI_COMPATIBLE_BASE } from '../models/catalog';
 const MAX_TOOL_ROUNDS = 4;
 
 type OpenAiMessage =
@@ -21,9 +21,17 @@ interface PendingCall {
   arguments: string;
 }
 
+/** Proveedor y credenciales de una llamada compatible con OpenAI. */
+export interface OpenAiTarget {
+  provider: 'groq' | 'openai';
+  model: string;
+  apiKey: string;
+}
+
 /**
- * Modelo de respaldo en Groq (API compatible con OpenAI). Misma interfaz que
+ * Modelos con API compatible con OpenAI (Groq y OpenAI). Misma interfaz que
  * GeminiService: streaming de texto y llamadas a las herramientas del catálogo.
+ * Sin "target" usa Groq con la clave y el modelo de la plataforma.
  */
 @Injectable()
 export class GroqService {
@@ -40,8 +48,10 @@ export class GroqService {
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal } = {},
+    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; target?: OpenAiTarget } = {},
   ): AsyncGenerator<GeminiEvent> {
+    const target: OpenAiTarget = options.target ?? { provider: 'groq', model: this.config.groqModel, apiKey: this.config.groqApiKey };
+    const label = target.provider === 'openai' ? 'OpenAI' : 'Groq';
     const messages: OpenAiMessage[] = [
       { role: 'system', content: systemInstruction },
       ...turns.map((t) => ({ role: t.role, content: t.content }) as OpenAiMessage),
@@ -59,7 +69,7 @@ export class GroqService {
     for (let round = 0; ; round++) {
       const useTools = hasTools && round < MAX_TOOL_ROUNDS;
       const body: Record<string, unknown> = {
-        model: this.config.groqModel,
+        model: target.model,
         messages,
         stream: true,
         stream_options: { include_usage: true },
@@ -69,22 +79,22 @@ export class GroqService {
         body.tool_choice = 'auto';
       }
       // Los modelos gpt-oss razonan antes de responder; "low" mantiene la latencia baja.
-      if (this.config.groqModel.startsWith('openai/gpt-oss')) body.reasoning_effort = 'low';
+      if (target.model.startsWith('openai/gpt-oss')) body.reasoning_effort = 'low';
 
-      const res = await fetch(GROQ_URL, {
+      const res = await fetch(`${OPENAI_COMPATIBLE_BASE[target.provider]}/chat/completions`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${this.config.groqApiKey}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${target.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: options.signal,
       });
       if (!res.ok || !res.body) {
         const detail = await res.text().catch(() => '');
-        throw new Error(`Groq ${res.status}: ${detail.slice(0, 300)}`);
+        throw Object.assign(new Error(`${label} ${res.status}: ${detail.slice(0, 300)}`), { status: res.status });
       }
 
       let content = '';
       const calls = new Map<number, PendingCall>();
-      for await (const delta of readSse(res.body)) {
+      for await (const delta of readSse(res.body, label)) {
         if (delta.usage) {
           yield { type: 'usage', input: delta.usage.prompt_tokens ?? 0, output: delta.usage.completion_tokens ?? 0 };
           continue;
@@ -134,7 +144,7 @@ interface SseDelta {
 }
 
 /** Lee un stream SSE de chat completions y devuelve el "delta" de cada evento. */
-export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<SseDelta> {
+export async function* readSse(body: ReadableStream<Uint8Array>, label = 'Groq'): AsyncGenerator<SseDelta> {
   const reader = body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   for (;;) {
@@ -149,7 +159,7 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator
         const data = line.slice(5).trim();
         if (!data || data === '[DONE]') continue;
         const json = JSON.parse(data);
-        if (json.error) throw new Error(`Groq: ${json.error.message ?? JSON.stringify(json.error)}`);
+        if (json.error) throw new Error(`${label}: ${json.error.message ?? JSON.stringify(json.error)}`);
         const delta = json.choices?.[0]?.delta;
         if (delta) yield delta as SseDelta;
         const usage = json.usage;

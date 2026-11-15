@@ -65,6 +65,7 @@ test('si Gemini falla, responde Groq e informa el motivo', async () => {
     model: 'openai/gpt-oss-120b',
     fallback: true,
     reason: 'Gemini agotó su cuota',
+    keyOwner: 'platform',
   });
   assert.equal(text(events), 'respuesta de groq');
 });
@@ -172,4 +173,40 @@ test('con allowFallback=false no se usa Groq aunque haya clave', async () => {
   const groq = Object.assign(fakeProvider([{ type: 'text', text: 'groq' }]), { enabled: true, model: 'g' });
   const llm = new LlmService(fakeProvider([], new Error('503 UNAVAILABLE')) as never, groq as never, cfg);
   await assert.rejects(collect(llm.run('s', [], { allowFallback: false })));
+});
+
+test('ruta elegida: OpenAI principal con respaldo en Gemini', async () => {
+  const cfg = config();
+  const calls: Array<Record<string, unknown>> = [];
+  const openaiLike = {
+    enabled: true,
+    model: 'g',
+    async *run(_s: string, _t: unknown, opts: { target?: Record<string, unknown> }) {
+      calls.push(opts.target ?? {});
+      throw Object.assign(new Error('OpenAI 429: rate limit'), { status: 429 });
+    },
+  };
+  const gemini = {
+    async *run(_s: string, _t: unknown, opts: { apiKey?: string; model?: string }) {
+      calls.push({ provider: 'gemini', model: opts.model, apiKey: opts.apiKey });
+      yield { type: 'text' as const, text: 'desde gemini' };
+    },
+  };
+  const llm = new LlmService(gemini as never, openaiLike as never, cfg);
+  const events = await collect(
+    llm.run('s', [], {
+      route: {
+        primary: { provider: 'openai', model: 'gpt-5.4-mini', apiKey: 'sk-empresa', keyOwner: 'company' },
+        fallback: { provider: 'gemini', model: 'gemini-3.5-flash', apiKey: 'g-plataforma', keyOwner: 'platform' },
+      },
+    }),
+  );
+  assert.deepEqual(calls, [
+    { provider: 'openai', model: 'gpt-5.4-mini', apiKey: 'sk-empresa' },
+    { provider: 'gemini', model: 'gemini-3.5-flash', apiKey: 'g-plataforma' },
+  ]);
+  assert.equal(text(events), 'desde gemini');
+  const fallbackInfo = (events.filter((e) => e.type === 'model')[1] as { info: { reason: string; provider: string } }).info;
+  assert.equal(fallbackInfo.provider, 'gemini');
+  assert.equal(fallbackInfo.reason, 'OpenAI agotó su cuota');
 });

@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { geminiClient } from '../chat/gemini.service';
+import { CompanyKeysService } from '../companies/company-keys.service';
 import { AppConfig } from '../config/app-config';
+import { embeddingModel, OPENAI_COMPATIBLE_BASE, type EmbeddingModel } from '../models/catalog';
 
 type Extractor = (
   input: string | string[],
@@ -7,72 +10,141 @@ type Extractor = (
 ) => Promise<{ tolist(): number[][] }>;
 
 /**
- * El modelo se carga una sola vez por instancia (Fluid compute reutiliza
- * instancias entre invocaciones). Se guarda a nivel de módulo para que lo
- * compartan la app HTTP y el contexto del worker si viven en la misma instancia.
+ * Los modelos locales se cargan una sola vez por instancia (Fluid compute
+ * reutiliza instancias entre invocaciones), uno por id.
  */
-let extractorPromise: Promise<Extractor> | null = null;
+const extractors = new Map<string, Promise<Extractor>>();
+
+/** Para qué se pide el embedding (algunos modelos lo usan para optimizarlo). */
+export type EmbedKind = 'query' | 'passage';
+
+/** Con qué modelo y para qué empresa (las claves de API son de la empresa). */
+export interface EmbedOptions {
+  model?: string | null;
+  companyId?: string | null;
+}
 
 /**
- * Embeddings locales y gratuitos (por defecto multilingual-e5-small; Transformers.js + ONNX).
- * Los modelos E5 requieren prefijos: "passage: " para documentos y "query: " para preguntas.
+ * Embeddings locales (Transformers.js + ONNX, familia E5 con prefijos
+ * "query:"/"passage:") o por API (Gemini, OpenAI), según el modelo elegido en
+ * la configuración del asistente.
  */
 @Injectable()
 export class EmbeddingsService {
   private readonly logger = new Logger(EmbeddingsService.name);
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly keys: CompanyKeysService,
+  ) {}
 
-  private getExtractor(): Promise<Extractor> {
-    if (!extractorPromise) {
-      extractorPromise = this.loadExtractor().catch((err) => {
-        extractorPromise = null; // permitir reintento en la siguiente llamada
-        throw err;
-      });
-    }
-    return extractorPromise;
+  /** Modelo efectivo: el elegido o el de la plataforma. */
+  modelId(model?: string | null): string {
+    return model || this.config.embeddingModel;
   }
 
-  private async loadExtractor(): Promise<Extractor> {
+  async embedPassages(texts: string[], options: EmbedOptions = {}): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    return this.embed(texts, 'passage', options);
+  }
+
+  async embedQuery(text: string, options: EmbedOptions = {}): Promise<number[]> {
+    return (await this.embed([text], 'query', options))[0];
+  }
+
+  private async embed(texts: string[], kind: EmbedKind, options: EmbedOptions): Promise<number[][]> {
+    const id = this.modelId(options.model);
+    const spec = embeddingModel(id) ?? localSpec(id);
+    let vectors: number[][];
+    if (spec.provider === 'gemini') vectors = await this.gemini(spec, texts, kind, options.companyId);
+    else if (spec.provider === 'openai') vectors = await this.openai(spec, texts, options.companyId);
+    else vectors = await this.local(id, texts, kind);
+    return check(vectors, spec);
+  }
+
+  private async local(id: string, texts: string[], kind: EmbedKind): Promise<number[][]> {
+    const extractor = await this.getExtractor(id);
+    const output = await extractor(
+      texts.map((t) => `${kind}: ${t}`),
+      { pooling: 'mean', normalize: true },
+    );
+    return output.tolist();
+  }
+
+  private async gemini(spec: EmbeddingModel, texts: string[], kind: EmbedKind, companyId?: string | null): Promise<number[][]> {
+    const apiKey = (companyId && (await this.keys.getKey(companyId, 'gemini'))) || this.config.geminiApiKey;
+    const response = await geminiClient(apiKey).models.embedContent({
+      model: spec.id,
+      contents: texts,
+      config: {
+        taskType: kind === 'query' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT',
+        outputDimensionality: spec.dimensions,
+      },
+    });
+    // Con menos dimensiones que las nativas, Gemini no normaliza: se hace aquí.
+    return (response.embeddings ?? []).map((e) => normalize(e.values ?? []));
+  }
+
+  private async openai(spec: EmbeddingModel, texts: string[], companyId?: string | null): Promise<number[][]> {
+    const apiKey = (companyId && (await this.keys.getKey(companyId, 'openai'))) || this.config.openaiApiKey;
+    if (!apiKey) throw new Error('Falta la clave de OpenAI de la empresa para calcular los embeddings');
+    const res = await fetch(`${OPENAI_COMPATIBLE_BASE.openai}/embeddings`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: spec.id, input: texts }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw Object.assign(new Error(`OpenAI ${res.status}: ${detail.slice(0, 300)}`), { status: res.status });
+    }
+    const body = (await res.json()) as { data: Array<{ index: number; embedding: number[] }> };
+    return body.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
+  }
+
+  private getExtractor(id: string): Promise<Extractor> {
+    let promise = extractors.get(id);
+    if (!promise) {
+      promise = this.loadExtractor(id).catch((err) => {
+        extractors.delete(id); // permitir reintento en la siguiente llamada
+        throw err;
+      });
+      extractors.set(id, promise);
+    }
+    return promise;
+  }
+
+  private async loadExtractor(id: string): Promise<Extractor> {
     const started = Date.now();
     const { pipeline, env } = await import('@huggingface/transformers');
     // En Vercel solo /tmp es escribible: ahí se cachea el modelo descargado.
     if (process.env.VERCEL) env.cacheDir = '/tmp/transformers-cache';
 
-    const extractor = await pipeline('feature-extraction', this.config.embeddingModel, {
+    const extractor = await pipeline('feature-extraction', id, {
       dtype: this.config.embeddingDtype as 'q8', // q8: cuantizado, más liviano y rápido en CPU
     });
-    this.logger.log(`Modelo ${this.config.embeddingModel} cargado en ${Date.now() - started} ms`);
+    this.logger.log(`Modelo ${id} cargado en ${Date.now() - started} ms`);
     return extractor as unknown as Extractor;
   }
+}
 
-  async embedPassages(texts: string[]): Promise<number[][]> {
-    if (texts.length === 0) return [];
-    const extractor = await this.getExtractor();
-    const output = await extractor(
-      texts.map((t) => `passage: ${t}`),
-      { pooling: 'mean', normalize: true },
-    );
-    return this.check(output.tolist());
-  }
+/** Modelo local fuera del catálogo (configurado por variable de entorno): dimensión sin verificar. */
+function localSpec(id: string): EmbeddingModel {
+  return { id, label: id, provider: 'local', dimensions: 0, note: '', pricePerM: 0 };
+}
 
-  async embedQuery(text: string): Promise<number[]> {
-    const extractor = await this.getExtractor();
-    const output = await extractor(`query: ${text}`, { pooling: 'mean', normalize: true });
-    return this.check(output.tolist())[0];
-  }
+function normalize(v: number[]): number[] {
+  const norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+  return norm > 0 ? v.map((x) => x / norm) : v;
+}
 
-  private check(vectors: number[][]): number[][] {
-    const expected = this.config.embeddingDimensions;
-    for (const v of vectors) {
-      if (v.length !== expected) {
-        throw new Error(
-          `El modelo devolvió vectores de ${v.length} dimensiones; la base espera ${expected}`,
-        );
-      }
+function check(vectors: number[][], spec: EmbeddingModel): number[][] {
+  for (const v of vectors) {
+    if (spec.dimensions && v.length !== spec.dimensions) {
+      throw new Error(`El modelo ${spec.id} devolvió vectores de ${v.length} dimensiones; se esperaban ${spec.dimensions}`);
     }
-    return vectors;
   }
+  return vectors;
 }
 
 /** Formato de texto que entiende pgvector: "[0.1,0.2,...]". */

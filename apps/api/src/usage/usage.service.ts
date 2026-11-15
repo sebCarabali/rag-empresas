@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
+import type { LlmProvider } from '../models/catalog';
 import { SupabaseService } from '../supabase/supabase.service';
 
 export type UsageChannel = 'app' | 'widget' | 'api' | 'eval' | 'warm' | 'ocr' | 'enrich';
@@ -14,7 +15,7 @@ export interface UsageEvent {
   projectId?: string | null;
   channel: UsageChannel;
   cacheMatch?: 'exact' | 'semantic' | null;
-  provider?: 'gemini' | 'groq' | null;
+  provider?: LlmProvider | null;
   model?: string | null;
   fallback?: boolean;
   keyOwner?: 'company' | 'platform' | null;
@@ -42,7 +43,7 @@ export class UsageService {
     private readonly config: AppConfig,
   ) {}
 
-  cost(provider: 'gemini' | 'groq' | null | undefined, usage: TokenUsage | null | undefined): number {
+  cost(provider: LlmProvider | null | undefined, usage: TokenUsage | null | undefined): number {
     if (!provider || !usage) return 0;
     const price = this.config.prices[provider];
     return (usage.input * price.input + usage.output * price.output) / 1_000_000;
