@@ -21,6 +21,10 @@ export interface SemanticFields {
   embedding: number[] | null;
   version: string;
   variant: string;
+  /** Modelo de lenguaje principal (ver cacheModelKey). */
+  model: string;
+  /** Modelo con que se calculó el embedding de la pregunta. */
+  embeddingModel: string;
 }
 
 export interface SimilarQuestion {
@@ -86,19 +90,20 @@ export class AnswerCacheService {
   /** Preguntas en caché con significado parecido (misma versión del contenido y del asistente). */
   async similar(
     projectId: string,
-    version: string,
+    semantic: Pick<SemanticFields, 'version' | 'model' | 'embeddingModel'>,
     variant: string | null,
     embedding: number[],
     minSimilarity = this.config.semanticCacheMinSimilarity,
   ): Promise<SimilarQuestion[]> {
     const { data, error } = await this.supabase.admin.rpc('match_answer_cache', {
       p_project_id: projectId,
-      p_version: version,
+      p_version: semantic.version,
       p_variant: variant,
-      p_model: this.config.geminiModel,
+      p_model: semantic.model,
       p_embedding: toPgVector(embedding),
       p_min_similarity: minSimilarity,
       p_limit: 5,
+      p_embedding_model: semantic.embeddingModel,
     });
     if (error) {
       this.logger.warn(`Caché por significado no disponible: ${error.message}`);
@@ -166,13 +171,13 @@ export class AnswerCacheService {
   }
 
   /**
-   * @param variant identifica la personalización (nombre, idioma, instrucciones, app/widget):
-   *   si cambia, la respuesta puede cambiar, así que se cachea aparte.
+   * @param variant identifica el canal (chat interno / widget).
+   * @param model modelo de lenguaje principal (cacheModelKey): cambiarlo deja de usar lo guardado.
    */
-  key(projectId: string, version: string, question: string, variant = ''): string {
+  key(projectId: string, version: string, question: string, variant = '', model = this.config.geminiModel): string {
     return createHash('sha256')
       .update(
-        [CACHE_SCHEMA_VERSION, projectId, version, this.config.geminiModel, variant, AnswerCacheService.normalizeQuestion(question)].join('|'),
+        [CACHE_SCHEMA_VERSION, projectId, version, model, variant, AnswerCacheService.normalizeQuestion(question)].join('|'),
       )
       .digest('hex');
   }
@@ -227,9 +232,10 @@ export class AnswerCacheService {
       created_at: new Date().toISOString(),
       expires_at: expires.toISOString(),
       question_embedding: semantic?.embedding ? toPgVector(semantic.embedding) : null,
+      question_embedding_model: semantic?.embedding ? semantic.embeddingModel : null,
       content_version: semantic?.version ?? null,
       variant: semantic?.variant ?? null,
-      model: this.config.geminiModel,
+      model: semantic?.model ?? this.config.geminiModel,
     });
     if (error) this.logger.warn(`No se pudo guardar en caché: ${error.message}`);
 

@@ -6,8 +6,8 @@ import { Button, Card, ErrorText, Spinner } from './ui';
 
 /** Orden fijo de las series (paleta categórica validada para daltonismo). */
 const SERIES = [
-  { key: 'gemini', label: 'Gemini', color: '#2a78d6' },
-  { key: 'groq', label: 'Groq (respaldo)', color: '#eb6834' },
+  { key: 'gemini', label: 'Modelo principal', color: '#2a78d6' },
+  { key: 'groq', label: 'Respaldo', color: '#eb6834' },
   { key: 'exact', label: 'Caché exacta', color: '#1baf7a' },
   { key: 'semantic', label: 'Caché por significado', color: '#eda100' },
 ] as const;
@@ -219,7 +219,8 @@ export function UsageTab({ projectId }: { projectId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-sm text-muted">
           De dónde salieron las respuestas y cuánto costaron. El gasto es un estimado con los precios públicos por token
-          {report && ` (Gemini US$ ${report.prices.gemini.input}/${report.prices.gemini.output} y Groq US$ ${report.prices.groq.input}/${report.prices.groq.output} por millón de tokens de entrada/salida)`};
+          {report &&
+            ` (Gemini US$ ${report.prices.gemini.input}/${report.prices.gemini.output}, Groq US$ ${report.prices.groq.input}/${report.prices.groq.output}${report.prices.openai ? ` y OpenAI US$ ${report.prices.openai.input}/${report.prices.openai.output}` : ''} por millón de tokens de entrada/salida)`};
           no incluye el cargo aparte de la búsqueda de Google de las descripciones web.
         </p>
         <select
@@ -256,7 +257,7 @@ export function UsageTab({ projectId }: { projectId: string }) {
             />
           </div>
           <p className="text-xs text-muted">
-            {int(summary.groq)} respuestas usaron el respaldo de Groq · {int(report.cachedAnswers)} respuestas guardadas en la
+            {int(summary.groq)} respuestas usaron el modelo de respaldo · {int(report.cachedAnswers)} respuestas guardadas en la
             caché ahora · la caché por significado reutiliza una pregunta parecida si la similitud es de al menos{' '}
             {Math.round(report.semanticThreshold * 100)} % y menciona las mismas cifras y términos del catálogo.
           </p>

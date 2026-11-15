@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
+import { ModelSettingsService } from '../models/model-settings.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { chunkSections, type Chunk } from './chunker';
 import { csvToCatalogItems, csvToChunks, type CatalogItem } from './csv-catalog';
@@ -42,6 +43,7 @@ export class IngestionService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly embeddings: EmbeddingsService,
+    private readonly models: ModelSettingsService,
     private readonly config: AppConfig,
     private readonly ocr: OcrService,
     private readonly keys: CompanyKeysService,
@@ -129,6 +131,8 @@ export class IngestionService {
       progress_total: chunks.length,
     });
     let lastProgress = Date.now();
+    // Modelo de embeddings elegido para el proyecto (las claves de API son de la empresa).
+    const embed = { model: await this.models.embeddingModel(doc.project_id), companyId: doc.company_id };
 
     for (let i = job.startChunk; i < chunks.length; i += EMBED_BATCH_SIZE) {
       // Avance visible en la app, como mucho cada 1,5 s para no saturar la base.
@@ -143,7 +147,7 @@ export class IngestionService {
       }
 
       const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);
-      const vectors = await this.embeddings.embedPassages(batch.map((c) => c.content));
+      const vectors = await this.embeddings.embedPassages(batch.map((c) => c.content), embed);
 
       const rows = batch.map((chunk, j) => ({
         document_id: doc.id,
@@ -153,6 +157,7 @@ export class IngestionService {
         content: chunk.content,
         metadata: { ...chunk.metadata, document_name: doc.name },
         embedding: toPgVector(vectors[j]),
+        embedding_model: embed.model,
       }));
 
       const { error: upsertError } = await db

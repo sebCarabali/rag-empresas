@@ -46,13 +46,19 @@ function engineWith(
     },
   };
   const engine = new ChatEngineService(
-    { embedQuery: async () => [0.1, 0.2] } as never,
+    { embedQuery: async () => [0.1, 0.2], modelId: () => 'modelo-test' } as never,
     llm as never,
     cache as never,
-    { getGeminiKey: async () => null } as never,
     { record: async (e: Record<string, unknown>) => void recorded.push(e) } as never,
     { rerank: async (_q: string, items: unknown[]) => ({ items, reranked: false, ms: 0 }) } as never,
     { ensureCurrent: async () => undefined } as never,
+    {
+      get: async () => ({ llmProvider: 'gemini', llmModel: null, llmFallback: 'groq', llmFallbackModel: null, embeddingModel: null }),
+      route: async () => ({
+        primary: { provider: 'gemini', model: 'gemini-test', apiKey: 'k', keyOwner: 'platform' },
+        fallback: null,
+      }),
+    } as never,
   );
   return { engine, puts, runs, recorded };
 }

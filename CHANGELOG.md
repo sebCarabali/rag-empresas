@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.20.0] - 2026-11-15
+
+### Agregado
+
+- Pestaña «Modelos» en Asistente y widget: proveedor de lenguaje (Gemini, Groq u OpenAI) y modelo (sugerido o escrito a mano), modelo de respaldo (o ninguno), modelo de embeddings (E5 local, Gemini Embedding, OpenAI text-embedding-3-small/large) y prueba de conexión de cada uno.
+- Claves de OpenAI y Groq por empresa en Supabase Vault (como la de Gemini), validadas antes de guardarse.
+- OpenAI como proveedor de lenguaje (API compatible, con herramientas del catálogo y streaming) y precios configurables para el panel de gastos.
+
+### Cambiado
+
+- Los embeddings guardan su modelo y aceptan cualquier dimensión; la búsqueda y la caché por significado solo comparan vectores del mismo modelo. Cambiar el modelo de embeddings de un proyecto lo reindexa en segundo plano.
+- La caché de respuestas se separa por proveedor y modelo de lenguaje; el panel de uso cuenta las respuestas del respaldo sea cual sea el proveedor.
+- Eliminada `set_embedding_dimensions` (ya no hace falta cambiar la dimensión de las columnas).
+
 ## [0.19.0] - 2026-11-14
 
 ### Agregado

@@ -14,8 +14,9 @@ function fakeSupabase(chunkCount: number) {
     content: `texto ${i}`,
     metadata: {},
     embedding: null as string | null,
+    embedding_model: null as string | null,
   }));
-  const project: Record<string, unknown> = { embedding_model: 'viejo', reindex_status: null, reindex_done: 0 };
+  const project: Record<string, unknown> = { embedding_model: 'viejo', reindex_status: null, reindex_done: 0, company_id: 'c' };
   const calls: string[] = [];
   const from = (table: string) => {
     const state: { op?: string; values?: Record<string, unknown>; gt?: string; limit?: number } = {};
@@ -42,7 +43,7 @@ function fakeSupabase(chunkCount: number) {
         }
         if (table === 'document_chunks') {
           const rows = chunks.filter((c) => !state.gt || c.id > state.gt).slice(0, state.limit ?? 1000);
-          return resolve({ data: rows.map(({ embedding: _e, ...r }) => r), count: chunks.length, error: null });
+          return resolve({ data: rows.map(({ embedding: _e, embedding_model: _m, ...r }) => r), count: chunks.length, error: null });
         }
         return resolve({ data: null, error: null });
       },
@@ -53,11 +54,18 @@ function fakeSupabase(chunkCount: number) {
 }
 
 const config = { embeddingModel: 'nuevo' } as never;
-const embeddings = { embedPassages: async (t: string[]) => t.map(() => [0.5, 0.5]) } as never;
+const embedCalls: unknown[] = [];
+const embeddings = {
+  embedPassages: async (t: string[], opts: unknown) => {
+    embedCalls.push(opts);
+    return t.map(() => [0.5, 0.5]);
+  },
+} as never;
+const models = { embeddingModel: async () => 'nuevo', invalidate: () => undefined } as never;
 
 test('reindexa todos los fragmentos y marca el proyecto con el modelo nuevo', async () => {
   const db = fakeSupabase(150);
-  const svc = new ReindexService(config, db as never, embeddings);
+  const svc = new ReindexService(config, db as never, embeddings, models);
   const jobs: unknown[] = [];
   svc.requester = async (job) => void jobs.push(job);
 
@@ -67,7 +75,8 @@ test('reindexa todos los fragmentos y marca el proyecto con el modelo nuevo', as
 
   const result = await svc.run({ kind: 'reembed', projectId: 'p', model: 'nuevo' });
   assert.equal(result.next, undefined);
-  assert.ok(db.chunks.every((c) => c.embedding === '[0.5,0.5]'));
+  assert.ok(db.chunks.every((c) => c.embedding === '[0.5,0.5]' && c.embedding_model === 'nuevo'));
+  assert.deepEqual(embedCalls[0], { model: 'nuevo', companyId: 'c' });
   assert.equal(db.project.embedding_model, 'nuevo');
   assert.equal(db.project.reindex_status, 'done');
   assert.equal(db.project.reindex_done, 150);
@@ -76,7 +85,7 @@ test('reindexa todos los fragmentos y marca el proyecto con el modelo nuevo', as
 
 test('abandona un trabajo de otro modelo', async () => {
   const db = fakeSupabase(3);
-  const svc = new ReindexService(config, db as never, embeddings);
+  const svc = new ReindexService(config, db as never, embeddings, models);
   await svc.run({ kind: 'reembed', projectId: 'p', model: 'viejo' });
   assert.ok(db.chunks.every((c) => c.embedding === null));
 });
