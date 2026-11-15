@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Header } from '@/components/header';
-import { FileIcon, PlusIcon, SettingsIcon } from '@/components/icons';
+import { FileIcon, PlusIcon } from '@/components/icons';
 import { Button, Card, ErrorText, Input, Spinner } from '@/components/ui';
 import { api, type Company, type Project } from '@/lib/api';
 
@@ -155,15 +155,6 @@ function Projects({ company }: { company: Company }) {
             {company.name} · cada proyecto tiene sus documentos, su asistente y su widget · tu rol: {company.role}
           </p>
         </div>
-        {canManage && (
-          <Link
-            href={`/companies/${company.id}/settings`}
-            className="inline-flex h-10 items-center gap-2 rounded-[10px] border border-line-strong bg-white px-4 text-sm font-medium hover:bg-canvas"
-          >
-            <SettingsIcon size={16} />
-            Configuración de la empresa
-          </Link>
-        )}
       </div>
 
       <ErrorText>{error}</ErrorText>

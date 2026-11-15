@@ -14,6 +14,7 @@ import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
 import type { Response } from 'express';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../common/supabase-error';
+import { MissingModelKeyError } from '../models/project-keys.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ChatbotsService } from '../chatbots/chatbots.service';
 import { ChatEngineService, type CacheMatch } from './chat-engine.service';
@@ -208,7 +209,10 @@ export class ChatController {
         this.logger.warn(`Cliente canceló la respuesta en ${conversationId}`);
       } else {
         this.logger.error(`Error en el chat ${conversationId}: ${(err as Error).message}`, (err as Error).stack);
-        emit({ type: 'error', message: 'No se pudo generar la respuesta. Intenta de nuevo.' });
+        emit({
+          type: 'error',
+          message: err instanceof MissingModelKeyError ? err.message : 'No se pudo generar la respuesta. Intenta de nuevo.',
+        });
       }
       if (answer) {
         await db

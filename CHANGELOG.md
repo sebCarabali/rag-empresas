@@ -2,6 +2,15 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.21.0] - 2026-11-15
+
+### Cambiado
+
+- Las claves de Gemini, OpenAI y Groq se configuran en cada asistente (Asistente y widget → Modelos) y se guardan cifradas en Supabase Vault (`chatbot_secrets`). La plataforma ya no aporta claves: se eliminaron `GEMINI_API_KEY`, `GROQ_KEY` y `OPENAI_API_KEY` del código.
+- Sin la clave del proveedor principal el asistente no responde y lo indica; el respaldo, el OCR de escaneados, las descripciones web y los embeddings por API usan solo las claves del asistente.
+- El respaldo viene desactivado por defecto.
+- La clave de Gemini que la empresa tenía guardada se copió a cada uno de sus asistentes; se eliminaron las claves por empresa y la página «Configuración de la empresa».
+
 ## [0.20.0] - 2026-11-15
 
 ### Agregado

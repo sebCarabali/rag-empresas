@@ -147,9 +147,9 @@ export class ReindexService {
     }
 
     let cursor = job.cursor;
-    const { data: progress } = await db.from('projects').select('reindex_done, company_id').eq('id', job.projectId).single();
+    const { data: progress } = await db.from('projects').select('reindex_done').eq('id', job.projectId).single();
     let done = progress?.reindex_done ?? 0;
-    const embed = { model: job.model, companyId: progress?.company_id ?? null };
+    const embed = { model: job.model, projectId: job.projectId };
 
     for (;;) {
       let query = db

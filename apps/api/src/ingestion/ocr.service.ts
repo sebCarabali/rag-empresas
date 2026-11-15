@@ -28,7 +28,7 @@ export function splitOcrPages(text: string): TextSection[] {
 
 /**
  * Reconocimiento de texto (OCR) con Gemini para PDF escaneados e imágenes.
- * Usa la clave de Gemini de la empresa si la configuró.
+ * Usa la clave de Gemini del asistente del proyecto.
  */
 @Injectable()
 export class OcrService {
@@ -42,10 +42,10 @@ export class OcrService {
   async transcribe(
     buffer: Buffer,
     mimeType: string,
-    apiKey?: string | null,
+    apiKey: string,
     context?: { companyId: string; projectId: string },
   ): Promise<TextSection[]> {
-    const ai = geminiClient(apiKey || this.config.geminiApiKey);
+    const ai = geminiClient(apiKey);
     const started = Date.now();
 
     let filePart: Record<string, unknown>;
@@ -73,7 +73,7 @@ export class OcrService {
           channel: 'ocr',
           provider: 'gemini',
           model: this.config.geminiModel,
-          keyOwner: apiKey ? 'company' : 'platform',
+          keyOwner: 'company',
           usage: geminiUsage(response.usageMetadata),
           durationMs: Date.now() - started,
         });

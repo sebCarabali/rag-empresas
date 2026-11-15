@@ -37,7 +37,7 @@ export class GeminiEmptyAnswerError extends Error {
   }
 }
 
-/** Clientes reutilizables por clave (la de la plataforma y las de cada empresa). */
+/** Clientes reutilizables por clave (la de cada asistente). */
 const clients = new Map<string, GoogleGenAI>();
 const MAX_CLIENTS = 100;
 
@@ -53,12 +53,10 @@ export function geminiClient(apiKey: string): GoogleGenAI {
 
 @Injectable()
 export class GeminiService {
-  /** Cliente con la clave de la plataforma (se puede reemplazar en pruebas). */
-  private ai: GoogleGenAI;
+  constructor(private readonly config: AppConfig) {}
 
-  constructor(private readonly config: AppConfig) {
-    this.ai = geminiClient(config.geminiApiKey);
-  }
+  /** Cliente para una clave (se reemplaza en pruebas). */
+  client: (apiKey: string) => GoogleGenAI = geminiClient;
 
   /**
    * Genera la respuesta en streaming. Si se pasan herramientas, el modelo puede
@@ -68,10 +66,10 @@ export class GeminiService {
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; apiKey?: string; model?: string } = {},
+    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; apiKey: string; model?: string },
   ): AsyncGenerator<GeminiEvent> {
-    // Clave de la empresa si la configuró; si no, la de la plataforma.
-    const ai = options.apiKey ? geminiClient(options.apiKey) : this.ai;
+    // Siempre con la clave del asistente: la plataforma no aporta claves.
+    const ai = this.client(options.apiKey);
     const contents: Content[] = turns.map((t) => ({
       role: t.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: t.content }],

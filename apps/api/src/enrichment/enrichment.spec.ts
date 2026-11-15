@@ -13,9 +13,9 @@ const { AppConfig } = require('../config/app-config');
 const { EnrichmentService } = require('./enrichment.service');
 
 test('describe: usa Google Search, toma el texto y deduplica las fuentes', async () => {
-  const service = new EnrichmentService({ admin: {} }, new AppConfig(), { getGeminiKey: async () => null }, { record: async () => undefined });
+  const service = new EnrichmentService({ admin: {} }, new AppConfig(), { getKey: async () => 'k' }, { record: async () => undefined });
   let request: Record<string, any> = {};
-  service.ai = {
+  service.client = () => ({
     models: {
       generateContent: async (req: Record<string, unknown>) => {
         request = req;
@@ -36,9 +36,9 @@ test('describe: usa Google Search, toma el texto y deduplica las fuentes', async
         };
       },
     },
-  };
+  });
 
-  const result = await service.describe('Familia', 'Chalis', { composiciones: ['Viscosa 100%'], tipos_de_tejido: ['Plano'] });
+  const result = await service.describe('Familia', 'Chalis', { composiciones: ['Viscosa 100%'], tipos_de_tejido: ['Plano'] }, 'k');
   assert.deepEqual(request.config.tools, [{ googleSearch: {} }]);
   assert.match(request.contents, /"Chalis"/);
   assert.match(request.contents, /Viscosa 100%/);

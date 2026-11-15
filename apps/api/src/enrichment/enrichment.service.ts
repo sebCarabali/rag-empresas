@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { geminiClient } from '../chat/gemini.service';
-import { CompanyKeysService } from '../companies/company-keys.service';
+import { ProjectKeysService } from '../models/project-keys.service';
 import { AppConfig } from '../config/app-config';
 import { geminiUsage, UsageService, type TokenUsage } from '../usage/usage.service';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -39,17 +39,15 @@ const MAX_SOURCES = 5;
 @Injectable()
 export class EnrichmentService {
   private readonly logger = new Logger(EnrichmentService.name);
-  /** Cliente con la clave de la plataforma (se puede reemplazar en pruebas). */
-  private ai: ReturnType<typeof geminiClient>;
-
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
-    private readonly keys: CompanyKeysService,
+    private readonly keys: ProjectKeysService,
     private readonly usage: UsageService,
-  ) {
-    this.ai = geminiClient(config.geminiApiKey);
-  }
+  ) {}
+
+  /** Cliente de Gemini para una clave (se reemplaza en pruebas). */
+  client: (apiKey: string) => ReturnType<typeof geminiClient> = geminiClient;
 
   async run(job: EnrichJob): Promise<{ next?: EnrichJob }> {
     if (!this.config.webEnrichment || this.config.enrichFields.length === 0) return {};
@@ -83,8 +81,12 @@ export class EnrichmentService {
       .eq('project_id', project.id)
       .eq('status', 'pending');
 
-    // Las búsquedas se hacen con la clave de Gemini de la empresa si la configuró.
-    const companyKey = await this.keys.getGeminiKey(project.company_id);
+    // Las búsquedas se hacen con la clave de Gemini del asistente; sin ella se omiten.
+    const geminiKey = await this.keys.getKey(project.id, 'gemini');
+    if (!geminiKey) {
+      this.logger.log(`Proyecto ${project.id}: sin clave de Gemini en el asistente; se omiten las descripciones web`);
+      return {};
+    }
     const byKey = new Map(list.map((v) => [`${v.campo}\u0000${v.valor}`, v]));
     let done = 0;
     for (const row of pending ?? []) {
@@ -95,14 +97,14 @@ export class EnrichmentService {
       const info = byKey.get(`${row.field}\u0000${row.value}`);
       try {
         const callStarted = Date.now();
-        const result = await this.describe(row.field, row.value, info?.contexto ?? {}, companyKey);
+        const result = await this.describe(row.field, row.value, info?.contexto ?? {}, geminiKey);
         void this.usage.record({
           companyId: project.company_id,
           projectId: project.id,
           channel: 'enrich',
           provider: 'gemini',
           model: this.config.geminiModel,
-          keyOwner: companyKey ? 'company' : 'platform',
+          keyOwner: 'company',
           usage: result.usage,
           durationMs: Date.now() - callStarted,
         });
@@ -142,7 +144,7 @@ export class EnrichmentService {
     field: string,
     value: string,
     context: { composiciones?: string[]; tipos_de_tejido?: string[] },
-    apiKey?: string | null,
+    apiKey: string,
   ): Promise<WebDescription> {
     const details = [
       context.tipos_de_tejido?.length ? `tejido ${context.tipos_de_tejido.join(' / ').toLowerCase()}` : null,
@@ -160,7 +162,7 @@ export class EnrichmentService {
       'No inventes marcas, precios ni datos de un fabricante. Si el nombre parece una denominación comercial ' +
       'o una agrupación interna, describe la categoría textil general que corresponde según el contexto.';
 
-    const ai = apiKey ? geminiClient(apiKey) : this.ai;
+    const ai = this.client(apiKey);
     const response = await ai.models.generateContent({
       model: this.config.geminiModel,
       contents: prompt,

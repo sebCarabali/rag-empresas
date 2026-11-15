@@ -67,14 +67,15 @@ Cada proyecto tiene su asistente (`chatbots`), configurable en **Proyecto → As
 
 `apps/widget-demo` es un sitio estático (proyecto de Vercel `rag-empresas-widget-demo`, sin build) que simula la web de una tienda ficticia en otro dominio. Se abre con `?bot=<clave pública>` y muestra un diagnóstico paso a paso: descarga de `widget.js`, configuración pública del chatbot, botón insertado y chat cargado en el iframe. Para que el chat se vea hay que activar el widget y agregar el dominio de la página en *Dominios autorizados*.
 
-### Clave de Gemini por empresa
+### Claves de API por asistente
 
-En **Configuración de la empresa** (owner/admin) cada empresa puede cargar su propia clave de Gemini. Así el chat y las descripciones web de sus proyectos usan su cuenta y su cuota.
+La plataforma **no aporta claves de modelos**: cada asistente (proyecto) usa solo las que la empresa guarda en **Asistente y widget → Modelos** (owner/admin), para Gemini, OpenAI y Groq. El consumo se cobra a la cuenta de la empresa en cada proveedor.
 
-- La API comprueba la clave contra Gemini antes de guardarla.
-- Se guarda **cifrada en Supabase Vault** mediante `set_company_gemini_key`. `company_secrets` solo guarda la referencia y los últimos 4 caracteres.
-- Solo `service_role` puede descifrarla (`get_company_gemini_key`): nunca llega al navegador.
-- Sin clave propia se usa `GEMINI_API_KEY` de la plataforma. El respaldo en Groq es siempre el de la plataforma.
+- La API comprueba la clave con el proveedor antes de guardarla.
+- Se guarda **cifrada en Supabase Vault** mediante `set_project_provider_key`. `chatbot_secrets` solo guarda la referencia y los últimos 4 caracteres; al borrar el proyecto se borran sus secretos del Vault.
+- Solo `service_role` puede descifrarla (`get_project_provider_key`): nunca llega al navegador.
+- Sin la clave del proveedor principal el asistente no responde (el chat de la app muestra qué falta; el widget, un mensaje genérico). El respaldo solo se usa si su proveedor también tiene clave.
+- La clave de Gemini también se usa para el OCR de escaneados y las descripciones web; sin ella, los escaneados fallan con un aviso y las descripciones se omiten. Los embeddings locales (E5) y el reordenador corren en el servidor y no necesitan clave.
 
 ### Descripciones web de las telas
 
@@ -92,7 +93,7 @@ Al terminar de procesar un CSV, el worker encola un trabajo `enrich` en la misma
 2. **Búsqueda híbrida:** pide 30 candidatos (vectores + texto en español, combinados con RRF).
 2b. **Reordenador:** un cross-encoder local (`RERANKER_MODEL`, por defecto `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, multilingüe, licencia Apache 2.0, archivo ONNX cuantizado de ~120 MB) lee la pregunta junto con cada candidato y los ordena por relevancia real. Luego se eligen 10, con un máximo de 2 por producto, para que una tela con muchas variantes no acapare el contexto. Si el reordenador no responde en `RERANKER_TIMEOUT_MS` (6 s; pasa en el arranque en frío mientras descarga el modelo), se usa el orden de la búsqueda. `RERANKER_ENABLED=false` lo apaga.
 3. **Gemini:** responde en streaming y puede llamar a las herramientas del catálogo (hasta 4 rondas). Las consultas que hace se muestran en el chat y se guardan en `messages.tool_calls`.
-4. **Respaldo en Groq:** si Gemini falla (cuota, servicio caído, clave inválida) o no empieza a responder en `GEMINI_FIRST_EVENT_TIMEOUT_MS` (25 s), la misma pregunta se responde con Groq (`GROQ_MODEL`, por defecto `openai/gpt-oss-120b`), con el mismo contexto y las mismas herramientas del catálogo. El chat muestra qué modelo respondió y por qué hubo cambio; queda guardado en `messages.model_info`. Las respuestas del respaldo también se cachean, pero como **provisionales**: cuando alguien repite esa pregunta se intenta solo con Gemini. Si Gemini responde, su respuesta reemplaza a la de Groq en la caché; si sigue fallando, se entrega la de Groq guardada, sin volver a llamar a Groq. Requiere `GROQ_KEY`.
+4. **Respaldo en Groq:** si Gemini falla (cuota, servicio caído, clave inválida) o no empieza a responder en `GEMINI_FIRST_EVENT_TIMEOUT_MS` (25 s), la misma pregunta se responde con Groq (`GROQ_MODEL`, por defecto `openai/gpt-oss-120b`), con el mismo contexto y las mismas herramientas del catálogo. El chat muestra qué modelo respondió y por qué hubo cambio; queda guardado en `messages.model_info`. Las respuestas del respaldo también se cachean, pero como **provisionales**: cuando alguien repite esa pregunta se intenta solo con Gemini. Si Gemini responde, su respuesta reemplaza a la de Groq en la caché; si sigue fallando, se entrega la de Groq guardada, sin volver a llamar a Groq. Requiere la clave del proveedor de respaldo guardada en el asistente.
 5. El prompt prohíbe afirmar que algo «no existe» a partir de resultados parciales.
 
 ### Uso, gasto y precalentamiento de la caché
@@ -166,7 +167,7 @@ En local `INGEST_INLINE=true`: los documentos se procesan en el mismo proceso de
 | Proyecto | Root Directory | Framework | Variables |
 |---|---|---|---|
 | `rag-empresas-web` | `apps/web` | Next.js | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL` |
-| `rag-empresas-api` | `apps/api` | Other (lo fija `vercel.json`) | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_KEY` (opcional), `WEB_ORIGIN` |
+| `rag-empresas-api` | `apps/api` | Other (lo fija `vercel.json`) | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `WEB_ORIGIN`; opcionales: `GEMINI_MODEL`, `GROQ_MODEL`, `OPENAI_MODEL` (modelos por defecto). Las claves de los modelos no van en variables de entorno: las guarda cada asistente |
 
 - `WEB_ORIGIN` lleva la URL del frontend (o varias separadas por coma) para CORS.
 - Rama de producción: `main`. Los pushes a `develop` y a cada PR generan *previews*.
@@ -225,7 +226,7 @@ En «Asistente y widget → Modelos» (owner/admin) cada proyecto elige:
 - **Modelo de lenguaje:** Gemini, Groq u OpenAI, con el modelo de una lista sugerida o escrito a mano, y un botón «Probar conexión».
 - **Respaldo:** otro proveedor (o ninguno) que responde solo si el principal falla o no empieza a tiempo; sus respuestas quedan provisionales en la caché.
 - **Embeddings:** Multilingual E5 base (local, gratis, 768), Gemini Embedding (`gemini-embedding-001`, 768), OpenAI `text-embedding-3-small` (1536) o `text-embedding-3-large` (3072). Al cambiarlo se recalculan los embeddings del proyecto en segundo plano con el texto guardado (sin OCR); mientras tanto la búsqueda por palabras sigue respondiendo. Conviene revisar `SEMANTIC_CACHE_MIN_SIMILARITY` con las pruebas de calidad: cada modelo reparte las similitudes de otra forma.
-- **Claves de la empresa** para Gemini, OpenAI y Groq, cifradas en Supabase Vault (solo se muestran los últimos 4 caracteres). Sin clave de la empresa se usa la de la plataforma (`GEMINI_API_KEY`, `GROQ_KEY`, `OPENAI_API_KEY` opcional).
+- **Claves del asistente** para Gemini, OpenAI y Groq (ver «Claves de API por asistente»).
 
 Cada fragmento guarda con qué modelo se calculó (`document_chunks.embedding_model`), así que proyectos con dimensiones distintas conviven en la misma tabla. La búsqueda vectorial es exacta (sin índice ANN, que exige una dimensión fija); con el filtro por proyecto es rápida hasta decenas de miles de fragmentos por proyecto. La caché de respuestas se separa por modelo de lenguaje: cambiarlo hace que las preguntas se vuelvan a generar la primera vez.
 

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { LlmRoute, LlmTarget } from '../chat/llm.service';
-import { CompanyKeysService } from '../companies/company-keys.service';
+import { MissingModelKeyError, ProjectKeysService } from './project-keys.service';
 import { AppConfig } from '../config/app-config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { DEFAULT_MODEL_SETTINGS, LLM_PROVIDERS, type LlmProvider, type ModelSettings } from './catalog';
@@ -9,11 +9,10 @@ import { DEFAULT_MODEL_SETTINGS, LLM_PROVIDERS, type LlmProvider, type ModelSett
 const TTL_MS = 30_000;
 
 export interface ProviderAvailability {
-  /** La empresa guardó su propia clave. */
-  company: boolean;
+  /** El asistente tiene guardada una clave de este proveedor. */
+  configured: boolean;
   last4: string | null;
-  /** Hay clave de la plataforma (se usa si la empresa no tiene). */
-  platform: boolean;
+  updatedAt: string | null;
 }
 
 /** Fila de chatbots → configuración de modelos. */
@@ -22,7 +21,7 @@ export function toSettings(row: Record<string, unknown> | null | undefined): Mod
   return {
     llmProvider: (row.llm_provider as LlmProvider) ?? 'gemini',
     llmModel: (row.llm_model as string | null) ?? null,
-    llmFallback: (row.llm_fallback as ModelSettings['llmFallback']) ?? 'groq',
+    llmFallback: (row.llm_fallback as ModelSettings['llmFallback']) ?? 'none',
     llmFallbackModel: (row.llm_fallback_model as string | null) ?? null,
     embeddingModel: (row.embedding_model as string | null) ?? null,
   };
@@ -39,7 +38,7 @@ export class ModelSettingsService {
 
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly keys: CompanyKeysService,
+    private readonly keys: ProjectKeysService,
     private readonly config: AppConfig,
   ) {}
 
@@ -76,41 +75,39 @@ export class ModelSettingsService {
     return this.config.openaiModel;
   }
 
-  /** Qué claves hay para cada proveedor (sin revelarlas). */
-  async availability(companyId: string): Promise<Record<LlmProvider, ProviderAvailability>> {
+  /** Qué claves tiene el asistente para cada proveedor (sin revelarlas). */
+  async availability(projectId: string): Promise<Record<LlmProvider, ProviderAvailability>> {
     const { data } = await this.supabase.admin
-      .from('company_secrets')
-      .select('gemini_key_last4, openai_key_last4, groq_key_last4')
-      .eq('company_id', companyId)
+      .from('chatbot_secrets')
+      .select('gemini_key_last4, gemini_key_updated_at, openai_key_last4, openai_key_updated_at, groq_key_last4, groq_key_updated_at')
+      .eq('project_id', projectId)
       .maybeSingle();
     const row = (data ?? {}) as Record<string, string | null>;
     const out = {} as Record<LlmProvider, ProviderAvailability>;
     for (const p of LLM_PROVIDERS) {
       const last4 = row[`${p}_key_last4`] ?? null;
-      out[p] = { company: Boolean(last4), last4, platform: Boolean(this.keys.platformKey(p)) };
+      out[p] = { configured: Boolean(last4), last4, updatedAt: row[`${p}_key_updated_at`] ?? null };
     }
     return out;
   }
 
-  /** Modelo y clave concretos (de la empresa si la tiene; si no, de la plataforma). Null si no hay clave. */
-  async target(companyId: string, provider: LlmProvider, model: string | null): Promise<LlmTarget | null> {
-    const companyKey = await this.keys.getKey(companyId, provider);
-    const apiKey = companyKey || this.keys.platformKey(provider);
+  /** Modelo concreto con la clave del asistente. Null si el asistente no tiene clave de ese proveedor. */
+  async target(projectId: string, provider: LlmProvider, model: string | null): Promise<LlmTarget | null> {
+    const apiKey = await this.keys.getKey(projectId, provider);
     if (!apiKey) return null;
-    return { provider, model: model || this.defaultModel(provider), apiKey, keyOwner: companyKey ? 'company' : 'platform' };
+    return { provider, model: model || this.defaultModel(provider), apiKey, keyOwner: 'company' };
   }
 
-  /** Ruta de modelos del proyecto: principal y respaldo, con sus claves. */
-  async route(companyId: string, settings: ModelSettings): Promise<LlmRoute> {
-    let primary = await this.target(companyId, settings.llmProvider, settings.llmModel);
-    if (!primary) {
-      // Sin clave para el proveedor elegido (p. ej. se borró): se usa Gemini para no dejar de responder.
-      this.logger.warn(`Sin clave de ${settings.llmProvider} para la empresa ${companyId}; se usa Gemini`);
-      primary = (await this.target(companyId, 'gemini', null))!;
-    }
+  /**
+   * Ruta de modelos del proyecto: principal y respaldo, con las claves del
+   * asistente. Sin clave para el principal no se puede responder.
+   */
+  async route(projectId: string, settings: ModelSettings): Promise<LlmRoute> {
+    const primary = await this.target(projectId, settings.llmProvider, settings.llmModel);
+    if (!primary) throw new MissingModelKeyError(settings.llmProvider);
     let fallback: LlmTarget | null = null;
     if (settings.llmFallback !== 'none' && this.config.llmFallback) {
-      fallback = await this.target(companyId, settings.llmFallback, settings.llmFallbackModel);
+      fallback = await this.target(projectId, settings.llmFallback, settings.llmFallbackModel);
       if (fallback && fallback.provider === primary.provider && fallback.model === primary.model) fallback = null;
     }
     return { primary, fallback };
