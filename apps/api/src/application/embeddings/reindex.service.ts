@@ -1,8 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../../config/app-config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModelSettingsService } from '../models/model-settings.service';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
-import { toPgVector } from '../../infrastructure/persistence/pg-vector';
+import {
+  ANSWER_CACHE,
+  CHUNK_REPOSITORY,
+  PROJECT_REPOSITORY,
+  type AnswerCache,
+  type ChunkRepository,
+  type ProjectRepository,
+} from '../ports';
 import { EmbeddingsService } from './embeddings.service';
 
 export interface ReembedJob {
@@ -49,31 +54,18 @@ export class ReindexService {
   private readonly lastCheck = new Map<string, number>();
 
   constructor(
-    private readonly config: AppConfig,
-    private readonly supabase: SupabaseService,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
+    @Inject(CHUNK_REPOSITORY) private readonly chunks: ChunkRepository,
+    @Inject(ANSWER_CACHE) private readonly cache: AnswerCache,
     private readonly embeddings: EmbeddingsService,
     private readonly models: ModelSettingsService,
   ) {}
 
   async status(projectId: string): Promise<ReindexStatus> {
-    const { data, error } = await this.supabase.admin
-      .from('projects')
-      .select('embedding_model, reindex_status, reindex_done, reindex_total, reindex_started_at, reindex_finished_at, reindex_error')
-      .eq('id', projectId)
-      .single();
-    if (error) throw new Error(error.message);
+    const state = await this.projects.reindexState(projectId);
     const target = await this.models.embeddingModel(projectId);
-    return {
-      model: target,
-      indexedWith: data.embedding_model,
-      status: data.reindex_status,
-      done: data.reindex_done,
-      total: data.reindex_total,
-      startedAt: data.reindex_started_at,
-      finishedAt: data.reindex_finished_at,
-      error: data.reindex_error,
-      outdated: data.embedding_model !== target,
-    };
+    const { embeddingModel, ...progress } = state;
+    return { model: target, indexedWith: embeddingModel, ...progress, outdated: embeddingModel !== target };
   }
 
   /**
@@ -96,29 +88,8 @@ export class ReindexService {
   /** Empieza a reindexar. Devuelve false si ya hay un reindexado en curso. */
   async start(projectId: string): Promise<boolean> {
     if (!this.requester) throw new Error('La cola no está disponible');
-    const db = this.supabase.admin;
-    const { count, error: countError } = await db
-      .from('document_chunks')
-      .select('id', { count: 'exact', head: true })
-      .eq('project_id', projectId);
-    if (countError) throw new Error(countError.message);
-
-    const stale = new Date(Date.now() - STALE_MS).toISOString();
-    const { data, error } = await db
-      .from('projects')
-      .update({
-        reindex_status: 'running',
-        reindex_done: 0,
-        reindex_total: count ?? 0,
-        reindex_started_at: new Date().toISOString(),
-        reindex_finished_at: null,
-        reindex_error: null,
-      })
-      .eq('id', projectId)
-      .or(`reindex_status.is.null,reindex_status.neq.running,reindex_started_at.lt.${stale}`)
-      .select('id');
-    if (error) throw new Error(error.message);
-    if (!data?.length) return false;
+    const count = await this.chunks.count(projectId);
+    if (!(await this.projects.claimReindex(projectId, count, new Date(Date.now() - STALE_MS)))) return false;
 
     const model = await this.models.embeddingModel(projectId);
     try {
@@ -127,7 +98,7 @@ export class ReindexService {
       await this.markFailed(projectId, (err as Error).message);
       throw err;
     }
-    this.logger.log(`Reindexado de ${projectId} encolado (${count ?? 0} fragmentos, ${model})`);
+    this.logger.log(`Reindexado de ${projectId} encolado (${count} fragmentos, ${model})`);
     return true;
   }
 
@@ -139,45 +110,29 @@ export class ReindexService {
       this.logger.warn(`Reindexado de ${job.projectId} con ${job.model} abandonado: el modelo actual es ${current}`);
       return {};
     }
-    const db = this.supabase.admin;
     const started = Date.now();
 
     if (!job.cursor) {
       // Las preguntas en caché se compararon con el modelo anterior: se quita solo su embedding.
-      await db.from('answer_cache').update({ question_embedding: null }).eq('project_id', job.projectId);
+      await this.cache.forgetEmbeddings(job.projectId);
     }
 
     let cursor = job.cursor;
-    const { data: progress } = await db.from('projects').select('reindex_done').eq('id', job.projectId).single();
-    let done = progress?.reindex_done ?? 0;
+    let done = (await this.projects.reindexState(job.projectId)).done ?? 0;
     const embed = { model: job.model, projectId: job.projectId };
 
     for (;;) {
-      let query = db
-        .from('document_chunks')
-        .select('id, document_id, project_id, company_id, chunk_index, content, metadata')
-        .eq('project_id', job.projectId)
-        .order('id')
-        .limit(PAGE);
-      if (cursor) query = query.gt('id', cursor);
-      const { data: rows, error } = await query;
-      if (error) throw new Error(error.message);
-      if (!rows?.length) break;
+      const rows = await this.chunks.page(job.projectId, cursor, PAGE);
+      if (!rows.length) break;
 
       for (let i = 0; i < rows.length; i += EMBED_BATCH) {
         const batch = rows.slice(i, i + EMBED_BATCH);
         const vectors = await this.embeddings.embedPassages(batch.map((r) => r.content), embed);
-        const { error: upsertError } = await db
-          .from('document_chunks')
-          .upsert(
-            batch.map((r, j) => ({ ...r, embedding: toPgVector(vectors[j]), embedding_model: job.model })),
-            { onConflict: 'id' },
-          );
-        if (upsertError) throw new Error(upsertError.message);
+        await this.chunks.saveEmbeddings(batch.map((chunk, j) => ({ chunk, embedding: vectors[j], model: job.model })));
       }
       cursor = rows[rows.length - 1].id;
       done += rows.length;
-      await db.from('projects').update({ reindex_done: done }).eq('id', job.projectId);
+      await this.projects.saveReindexProgress(job.projectId, done);
 
       if (rows.length < PAGE) break;
       if (Date.now() - started > TIME_BUDGET_MS) {
@@ -185,23 +140,12 @@ export class ReindexService {
       }
     }
 
-    await db
-      .from('projects')
-      .update({
-        embedding_model: job.model,
-        reindex_status: 'done',
-        reindex_done: done,
-        reindex_finished_at: new Date().toISOString(),
-      })
-      .eq('id', job.projectId);
+    await this.projects.finishReindex(job.projectId, job.model, done);
     this.logger.log(`Proyecto ${job.projectId} reindexado: ${done} fragmentos con ${job.model}`);
     return {};
   }
 
   async markFailed(projectId: string, message: string): Promise<void> {
-    await this.supabase.admin
-      .from('projects')
-      .update({ reindex_status: 'failed', reindex_error: message.slice(0, 500), reindex_finished_at: new Date().toISOString() })
-      .eq('id', projectId);
+    await this.projects.failReindex(projectId, message);
   }
 }

@@ -1,9 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, Logger, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
-import { CurrentUser, type AuthUser } from '../auth/auth-user';
-import { unwrap } from '../supabase-error';
-import { AppConfig } from '../../../config/app-config';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { CurrentUser, scopeOf, type AuthUser } from '../auth/auth-user';
+import { PROJECT_REPOSITORY, type ProjectRepository } from '../../../application/ports';
+import { ProjectsService } from '../../../application/projects/projects.service';
 
 class CreateProjectDto {
   @IsString()
@@ -28,86 +27,45 @@ class UpdateProjectDto {
   description?: string;
 }
 
-const PROJECT_COLUMNS = 'id, company_id, name, description, created_at, updated_at';
-
 @Controller()
 export class ProjectsController {
-  private readonly logger = new Logger(ProjectsController.name);
-
   constructor(
-    private readonly supabase: SupabaseService,
-    private readonly config: AppConfig,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
+    private readonly service: ProjectsService,
   ) {}
 
   @Get('companies/:companyId/projects')
-  async list(@CurrentUser() user: AuthUser, @Param('companyId', ParseUUIDPipe) companyId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    return unwrap(
-      await db
-        .from('projects')
-        .select(PROJECT_COLUMNS)
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false }),
-    );
+  list(@CurrentUser() user: AuthUser, @Param('companyId', ParseUUIDPipe) companyId: string) {
+    return this.projects.list(scopeOf(user), companyId);
   }
 
   @Post('companies/:companyId/projects')
-  async create(
+  create(
     @CurrentUser() user: AuthUser,
     @Param('companyId', ParseUUIDPipe) companyId: string,
     @Body() dto: CreateProjectDto,
   ) {
-    const db = this.supabase.forUser(user.accessToken);
-    return unwrap(
-      await db
-        .from('projects')
-        .insert({ company_id: companyId, name: dto.name, description: dto.description ?? null })
-        .select(PROJECT_COLUMNS)
-        .single(),
-    );
+    return this.projects.create(scopeOf(user), { companyId, name: dto.name, description: dto.description ?? null });
   }
 
   @Get('projects/:projectId')
-  async get(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    return unwrap(
-      await db.from('projects').select(PROJECT_COLUMNS).eq('id', projectId).single(),
-      'Proyecto no encontrado',
-    );
+  get(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
+    return this.projects.get(scopeOf(user), projectId);
   }
 
   @Patch('projects/:projectId')
-  async update(
+  update(
     @CurrentUser() user: AuthUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() dto: UpdateProjectDto,
   ) {
-    const db = this.supabase.forUser(user.accessToken);
-    return unwrap(
-      await db.from('projects').update(dto).eq('id', projectId).select(PROJECT_COLUMNS).single(),
-      'Proyecto no encontrado o sin permiso',
-    );
+    return this.projects.update(scopeOf(user), projectId, dto);
   }
 
   /** Elimina el proyecto (documentos, chunks y chats caen en cascada) y sus archivos. */
   @Delete('projects/:projectId')
   @HttpCode(204)
   async remove(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-
-    const docs = unwrap(await db.from('documents').select('storage_path').eq('project_id', projectId));
-
-    const deleted = unwrap(
-      await db.from('projects').delete().eq('id', projectId).select('id').single(),
-      'Proyecto no encontrado o sin permiso',
-    );
-
-    // Solo después de confirmar que RLS permitió borrar, se limpian los archivos.
-    if (deleted && docs.length > 0) {
-      const { error } = await this.supabase.admin.storage
-        .from(this.config.storageBucket)
-        .remove(docs.map((d) => d.storage_path));
-      if (error) this.logger.error(`No se pudieron borrar archivos del proyecto ${projectId}: ${error.message}`);
-    }
+    await this.service.remove(scopeOf(user), projectId);
   }
 }

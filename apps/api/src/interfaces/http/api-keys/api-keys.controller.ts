@@ -1,21 +1,16 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  Param,
-  ParseUUIDPipe,
-  Post,
-} from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { IsString, Length } from 'class-validator';
-import { CurrentUser, type AuthUser } from '../auth/auth-user';
+import { CurrentUser, scopeOf, type AuthUser } from '../auth/auth-user';
 import { ChatbotsService } from '../../../application/chatbots/chatbots.service';
-import { unwrap } from '../supabase-error';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
-import { ApiKeysService, generateKey } from '../../../application/api-keys/api-keys.service';
+import { ApiKeysService } from '../../../application/api-keys/api-keys.service';
+import { ProjectAccessService } from '../../../application/access/project-access.service';
+import {
+  ADMIN_ROLES,
+  API_KEY_REPOSITORY,
+  type ApiKeyRepository,
+  type DataScope,
+  type ProjectRef,
+} from '../../../application/ports';
 
 class CreateKeyDto {
   @IsString()
@@ -23,39 +18,27 @@ class CreateKeyDto {
   name: string;
 }
 
-const KEY_COLUMNS = 'id, name, prefix, last4, created_at, last_used_at, revoked_at';
-/** Claves activas por proyecto. */
-const MAX_ACTIVE_KEYS = 10;
+const ADMIN_ONLY = 'Solo owner o admin pueden administrar las claves de API';
 
 /** Administración de claves secretas de API del proyecto (owner/admin). */
 @Controller('projects/:projectId')
 export class ApiKeysController {
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(API_KEY_REPOSITORY) private readonly repository: ApiKeyRepository,
     private readonly keys: ApiKeysService,
     private readonly chatbots: ChatbotsService,
+    private readonly access: ProjectAccessService,
   ) {}
 
-  private async requireAdmin(user: AuthUser, projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    const project = unwrap(
-      await db.from('projects').select('id, company_id').eq('id', projectId).single(),
-      'Proyecto no encontrado',
-    );
-    const { data: allowed } = await db.rpc('has_company_role', {
-      p_company_id: project.company_id,
-      p_roles: ['owner', 'admin'],
-    });
-    if (!allowed) throw new ForbiddenException('Solo owner o admin pueden administrar las claves de API');
-    return { db, project };
+  private async requireAdmin(user: AuthUser, projectId: string): Promise<{ scope: DataScope; project: ProjectRef }> {
+    const scope = scopeOf(user);
+    return { scope, project: await this.access.require(scope, projectId, ADMIN_ROLES, ADMIN_ONLY) };
   }
 
   @Get('api-keys')
   async list(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const { db } = await this.requireAdmin(user, projectId);
-    return unwrap(
-      await db.from('api_keys').select(KEY_COLUMNS).eq('project_id', projectId).order('created_at', { ascending: false }),
-    );
+    const { scope } = await this.requireAdmin(user, projectId);
+    return this.repository.list(scope, projectId);
   }
 
   /** Genera una clave. Es la única vez que se devuelve completa: solo se guarda su hash. */
@@ -66,31 +49,7 @@ export class ApiKeysController {
     @Body() dto: CreateKeyDto,
   ) {
     const { project } = await this.requireAdmin(user, projectId);
-    const admin = this.supabase.admin;
-    const { count } = await admin
-      .from('api_keys')
-      .select('id', { count: 'exact', head: true })
-      .eq('project_id', projectId)
-      .is('revoked_at', null);
-    if ((count ?? 0) >= MAX_ACTIVE_KEYS) throw new BadRequestException(`Máximo ${MAX_ACTIVE_KEYS} claves activas por proyecto`);
-
-    const { key, prefix, last4, hash } = generateKey();
-    const row = unwrap(
-      await admin
-        .from('api_keys')
-        .insert({
-          company_id: project.company_id,
-          project_id: projectId,
-          name: dto.name.trim(),
-          prefix,
-          last4,
-          key_hash: hash,
-          created_by: user.id,
-        })
-        .select(KEY_COLUMNS)
-        .single(),
-    );
-    return { ...row, key };
+    return this.keys.create(project, dto.name, user.id);
   }
 
   @Delete('api-keys/:keyId')
@@ -101,24 +60,14 @@ export class ApiKeysController {
     @Param('keyId', ParseUUIDPipe) keyId: string,
   ) {
     await this.requireAdmin(user, projectId);
-    unwrap(
-      await this.supabase.admin
-        .from('api_keys')
-        .update({ revoked_at: new Date().toISOString() })
-        .eq('id', keyId)
-        .eq('project_id', projectId)
-        .is('revoked_at', null)
-        .select('id')
-        .single(),
-      'Clave no encontrada o ya revocada',
-    );
+    await this.repository.revoke(projectId, keyId);
   }
 
   /** Token de prueba del widget (1 h), para validar la instalación sin servidor propio. */
   @Post('chatbot/test-token')
   async testToken(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const { db } = await this.requireAdmin(user, projectId);
-    const bot = await this.chatbots.findByProject(db, projectId);
+    const { scope } = await this.requireAdmin(user, projectId);
+    const bot = await this.chatbots.findByProject(scope, projectId);
     if (!bot) throw new BadRequestException('Primero guarda la configuración del asistente');
     return this.keys.issueToken(bot.id, 3600, 'prueba');
   }

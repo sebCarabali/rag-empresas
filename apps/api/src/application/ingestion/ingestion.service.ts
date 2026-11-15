@@ -1,17 +1,26 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../../config/app-config';
-import { toPgVector } from '../../infrastructure/persistence/pg-vector';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { ModelSettingsService } from '../models/model-settings.service';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { ocrCachePath } from '../documents/documents.service';
 import { chunkSections, type Chunk } from '../../domain/ingestion/chunker';
 import { csvToCatalogItems, csvToChunks, type CatalogItem } from '../../domain/ingestion/csv-catalog';
 import { TABULAR_MIME_TYPES, UnsupportedFileError, XLSX_MIME, type TextSection } from '../../domain/ingestion/documents';
 import {
+  CATALOG_REPOSITORY,
+  CHUNK_REPOSITORY,
   DOCUMENT_READER,
+  DOCUMENT_REPOSITORY,
+  FILE_STORAGE,
   PROVIDER_KEY_READER,
+  SYSTEM_SCOPE,
   TEXT_RECOGNIZER,
+  type CatalogRepository,
+  type ChunkRepository,
+  type DocumentFile,
+  type DocumentProgress,
   type DocumentReader,
+  type DocumentRepository,
+  type FileStorage,
   type ProviderKeyReader,
   type TextRecognizer,
 } from '../ports';
@@ -38,7 +47,6 @@ export class PermanentIngestionError extends Error {}
 export class OcrFailedError extends Error {}
 
 const EMBED_BATCH_SIZE = 16;
-const CATALOG_INSERT_BATCH = 500;
 /** Margen bajo el límite de 300 s de Vercel (Hobby) para guardar y encolar el siguiente lote. */
 const TIME_BUDGET_MS = 200_000;
 
@@ -47,10 +55,12 @@ export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
 
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(CHUNK_REPOSITORY) private readonly chunks: ChunkRepository,
+    @Inject(CATALOG_REPOSITORY) private readonly catalog: CatalogRepository,
+    @Inject(FILE_STORAGE) private readonly files: FileStorage,
     private readonly embeddings: EmbeddingsService,
     private readonly models: ModelSettingsService,
-    private readonly config: AppConfig,
     @Inject(TEXT_RECOGNIZER) private readonly ocr: TextRecognizer,
     @Inject(DOCUMENT_READER) private readonly reader: DocumentReader,
     @Inject(PROVIDER_KEY_READER) private readonly keys: ProviderKeyReader,
@@ -63,14 +73,7 @@ export class IngestionService {
    */
   async process(job: IngestionJob): Promise<IngestionResult> {
     const started = Date.now();
-    const db = this.supabase.admin;
-
-    const { data: doc, error } = await db
-      .from('documents')
-      .select('id, company_id, project_id, name, storage_path, mime_type, status')
-      .eq('id', job.documentId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
+    const doc = await this.documents.find(SYSTEM_SCOPE, job.documentId);
     if (!doc) {
       this.logger.warn(`Documento ${job.documentId} ya no existe; se descarta el mensaje`);
       return {};
@@ -87,18 +90,16 @@ export class IngestionService {
         processing_started_at: new Date().toISOString(),
       });
       // Reprocesamiento: borrar chunks anteriores.
-      const { error: delError } = await db.from('document_chunks').delete().eq('document_id', doc.id);
-      if (delError) throw new Error(delError.message);
+      await this.chunks.deleteForDocument(doc.id);
     }
 
-    const { data: file, error: dlError } = await db.storage
-      .from(this.config.storageBucket)
-      .download(doc.storage_path);
-    if (dlError || !file) {
-      throw new PermanentIngestionError(`No se pudo descargar el archivo: ${dlError?.message ?? 'vacío'}`);
+    let buffer: Buffer;
+    try {
+      buffer = await this.files.download(doc.storage_path);
+    } catch (err) {
+      throw new PermanentIngestionError(`No se pudo descargar el archivo: ${(err as Error).message}`);
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
     let chunks: Chunk[];
     let catalogItems: CatalogItem[] = [];
     try {
@@ -123,7 +124,7 @@ export class IngestionService {
     // Catálogo estructurado (filtros exactos y conteos): se reemplaza al iniciar el documento.
     if (job.startChunk === 0 && TABULAR_MIME_TYPES.has(doc.mime_type)) {
       await this.updateDocument(doc.id, { progress_stage: 'catalog', progress_total: chunks.length });
-      await this.replaceCatalog(doc, catalogItems);
+      await this.catalog.replaceForDocument({ id: doc.id, companyId: doc.company_id, projectId: doc.project_id }, catalogItems);
     }
 
     if (chunks.length === 0) {
@@ -156,21 +157,20 @@ export class IngestionService {
       const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);
       const vectors = await this.embeddings.embedPassages(batch.map((c) => c.content), embed);
 
-      const rows = batch.map((chunk, j) => ({
-        document_id: doc.id,
-        project_id: doc.project_id,
-        company_id: doc.company_id,
-        chunk_index: i + j,
-        content: chunk.content,
-        metadata: { ...chunk.metadata, document_name: doc.name },
-        embedding: toPgVector(vectors[j]),
-        embedding_model: embed.model,
-      }));
-
-      const { error: upsertError } = await db
-        .from('document_chunks')
-        .upsert(rows, { onConflict: 'document_id,chunk_index' });
-      if (upsertError) throw new Error(upsertError.message);
+      await this.chunks.save(
+        batch.map((chunk, j) => ({
+          chunk: {
+            document_id: doc.id,
+            project_id: doc.project_id,
+            company_id: doc.company_id,
+            chunk_index: i + j,
+            content: chunk.content,
+            metadata: { ...chunk.metadata, document_name: doc.name },
+          },
+          embedding: vectors[j],
+          model: embed.model,
+        })),
+      );
     }
 
     await this.updateDocument(doc.id, {
@@ -191,17 +191,12 @@ export class IngestionService {
    * OCR con la clave de Gemini de la empresa. La transcripción se guarda junto al archivo
    * para que los lotes siguientes (y los reprocesos) no vuelvan a pagar el OCR.
    */
-  private async cachedOcr(
-    doc: { id: string; company_id: string; project_id: string; storage_path: string },
-    buffer: Buffer,
-    mimeType: string,
-  ): Promise<TextSection[]> {
-    const storage = this.supabase.admin.storage.from(this.config.storageBucket);
-    const cachePath = `${doc.storage_path}.ocr.json`;
-    const { data: cached } = await storage.download(cachePath);
+  private async cachedOcr(doc: DocumentFile, buffer: Buffer, mimeType: string): Promise<TextSection[]> {
+    const cachePath = ocrCachePath(doc.storage_path);
+    const cached = await this.files.download(cachePath).catch(() => null);
     if (cached) {
       try {
-        return JSON.parse(await cached.text()) as TextSection[];
+        return JSON.parse(cached.toString('utf8')) as TextSection[];
       } catch {
         // caché corrupta: se vuelve a transcribir
       }
@@ -223,44 +218,15 @@ export class IngestionService {
     } catch (err) {
       throw new OcrFailedError(`OCR con Gemini falló: ${(err as Error).message}`);
     }
-    await storage
-      .upload(cachePath, JSON.stringify(sections), { contentType: 'application/json', upsert: true })
-      .catch(() => undefined);
+    await this.files.upload(cachePath, JSON.stringify(sections), 'application/json').catch(() => undefined);
     return sections;
-  }
-
-  private async replaceCatalog(
-    doc: { id: string; company_id: string; project_id: string },
-    items: CatalogItem[],
-  ): Promise<void> {
-    const db = this.supabase.admin;
-    const { error: delError } = await db.from('catalog_items').delete().eq('document_id', doc.id);
-    if (delError) throw new Error(`Catálogo: ${delError.message}`);
-
-    for (let i = 0; i < items.length; i += CATALOG_INSERT_BATCH) {
-      const rows = items.slice(i, i + CATALOG_INSERT_BATCH).map((item) => ({
-        company_id: doc.company_id,
-        project_id: doc.project_id,
-        document_id: doc.id,
-        row_number: item.row,
-        name: item.name,
-        code: item.code,
-        attributes: item.attributes,
-        numbers: item.numbers,
-        image_url: item.image,
-      }));
-      const { error } = await db.from('catalog_items').insert(rows);
-      if (error) throw new Error(`Catálogo: ${error.message}`);
-    }
-    if (items.length > 0) this.logger.log(`Documento ${doc.id}: ${items.length} productos en el catálogo`);
   }
 
   async markFailed(documentId: string, message: string): Promise<void> {
     await this.updateDocument(documentId, { status: 'failed', error: message.slice(0, 1000) });
   }
 
-  private async updateDocument(id: string, values: Record<string, unknown>): Promise<void> {
-    const { error } = await this.supabase.admin.from('documents').update(values).eq('id', id);
-    if (error) throw new Error(error.message);
+  private updateDocument(id: string, values: DocumentProgress): Promise<void> {
+    return this.documents.update(id, values);
   }
 }

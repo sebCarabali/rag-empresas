@@ -1,4 +1,5 @@
 import type { LlmProvider } from '../../domain/models/catalog';
+import type { DataScope } from './data-scope';
 
 /** Puerto de salida: lee las claves de API que la empresa guardó en el asistente (nunca las expone). */
 export interface ProviderKeyReader {
@@ -15,5 +16,12 @@ export interface ProviderKeyValidator {
   validate(provider: LlmProvider, apiKey: string): Promise<void>;
 }
 
+/** Puerto de salida: guarda o borra las claves del asistente en el almacén de secretos (solo owner/admin). */
+export interface ProviderKeyWriter {
+  save(scope: DataScope, projectId: string, provider: LlmProvider, apiKey: string): Promise<void>;
+  remove(scope: DataScope, projectId: string, provider: LlmProvider): Promise<void>;
+}
+
+export const PROVIDER_KEY_WRITER = Symbol('PROVIDER_KEY_WRITER');
 export const PROVIDER_KEY_READER = Symbol('PROVIDER_KEY_READER');
 export const PROVIDER_KEY_VALIDATOR = Symbol('PROVIDER_KEY_VALIDATOR');

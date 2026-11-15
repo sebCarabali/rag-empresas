@@ -1,13 +1,14 @@
 import {
   CanActivate,
   ExecutionContext,
+  Inject,
   Injectable,
   SetMetadata,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { ACCESS_TOKEN_VERIFIER, type AccessTokenVerifier } from '../../../application/ports';
 import type { AuthUser } from './auth-user';
 
 export const IS_PUBLIC = 'isPublic';
@@ -17,15 +18,14 @@ export const Public = () => SetMetadata(IS_PUBLIC, true);
 export type AuthenticatedRequest = Request & { user: AuthUser };
 
 /**
- * Valida el JWT de Supabase Auth enviado en `Authorization: Bearer <token>`.
- * getClaims() verifica la firma con las llaves públicas (JWKS) del proyecto
- * y las cachea, así que no hace una llamada a Supabase en cada petición.
+ * Exige `Authorization: Bearer <token>` de sesión en todo endpoint que no sea
+ * @Public(). La verificación la hace el adaptador de AccessTokenVerifier.
  */
 @Injectable()
-export class SupabaseAuthGuard implements CanActivate {
+export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly supabase: SupabaseService,
+    @Inject(ACCESS_TOKEN_VERIFIER) private readonly verifier: AccessTokenVerifier,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -42,23 +42,9 @@ export class SupabaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Falta el token de acceso');
     }
 
-    let claims: { sub?: string; email?: unknown } | undefined;
-    try {
-      const { data, error } = await this.supabase.admin.auth.getClaims(token);
-      if (!error) claims = data?.claims;
-    } catch {
-      // Token malformado: getClaims puede lanzar en lugar de devolver error.
-    }
-    if (!claims?.sub) {
-      throw new UnauthorizedException('Token inválido o vencido');
-    }
-    const data = { claims: { ...claims, sub: claims.sub } };
-
-    request.user = {
-      id: data.claims.sub,
-      email: typeof data.claims.email === 'string' ? data.claims.email : undefined,
-      accessToken: token,
-    };
+    const user = await this.verifier.verify(token);
+    if (!user) throw new UnauthorizedException('Token inválido o vencido');
+    request.user = { ...user, accessToken: token };
     return true;
   }
 }

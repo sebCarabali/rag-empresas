@@ -1,11 +1,6 @@
 import type { ExtraContext, RetrievedChunk, Source } from '../../domain/chat/prompt';
 import type { ToolDeclaration, ToolExecutor } from '../../domain/llm/llm';
-
-/**
- * Ámbito de datos con que se consulta (por ejemplo, el cliente con el JWT del
- * usuario para que apliquen sus permisos). La aplicación no lo interpreta.
- */
-export type DataScope = unknown;
+import type { DataScope } from './data-scope';
 
 export interface CatalogToolCall {
   name: string;

@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../../config/app-config';
 import type { LlmProvider } from '../../domain/models/catalog';
 import type { TokenUsage } from '../../domain/llm/llm';
-import type { UsageEvent, UsageRecorder } from '../../application/ports';
+import type { DataScope, UsageEvent, UsageRecorder, UsageStats } from '../../application/ports';
 import { SupabaseService } from '../supabase/supabase.service';
+import { unwrap } from './supabase-result';
 
 /**
  * Adaptador del puerto UsageRecorder: registro de uso para el panel
@@ -47,5 +48,17 @@ export class SupabaseUsageRecorder implements UsageRecorder {
     } catch (err) {
       this.logger.warn(`No se registró el uso: ${(err as Error).message}`);
     }
+  }
+}
+
+/** Adaptador de UsageStats: función usage_daily (con RLS del usuario). */
+@Injectable()
+export class SupabaseUsageStats implements UsageStats {
+  constructor(private readonly supabase: SupabaseService) {}
+
+  async daily(scope: DataScope, projectId: string, days: number, timeZone: string): Promise<unknown[]> {
+    return unwrap(
+      await this.supabase.client(scope).rpc('usage_daily', { p_project_id: projectId, p_days: days, p_tz: timeZone }),
+    ) as unknown[];
   }
 }

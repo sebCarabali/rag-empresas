@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Inject,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -12,15 +13,17 @@ import {
 } from '@nestjs/common';
 import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
 import type { Response } from 'express';
-import { CurrentUser, type AuthUser } from '../auth/auth-user';
-import { unwrap } from '../supabase-error';
-import { MissingModelKeyError } from '../../../domain/llm/llm';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { CurrentUser, scopeOf, type AuthUser } from '../auth/auth-user';
+import { MissingModelKeyError, type ModelInfo } from '../../../domain/llm/llm';
 import { ChatbotsService } from '../../../application/chatbots/chatbots.service';
 import { ChatEngineService, type CacheMatch } from '../../../application/chat/chat-engine.service';
-import type { CatalogToolCall } from '../../../infrastructure/persistence/catalog-tools';
-import type { ChatTurn } from '../../../domain/llm/llm';
-import type { ModelInfo } from '../../../domain/llm/llm';
+import {
+  CONVERSATION_REPOSITORY,
+  type CatalogToolCall,
+  type ConversationRepository,
+  type ProjectRepository,
+  PROJECT_REPOSITORY,
+} from '../../../application/ports';
 import type { Source } from '../../../domain/chat/prompt';
 
 class CreateConversationDto {
@@ -45,21 +48,15 @@ export class ChatController {
   private readonly logger = new Logger(ChatController.name);
 
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(CONVERSATION_REPOSITORY) private readonly conversations: ConversationRepository,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
     private readonly engine: ChatEngineService,
     private readonly chatbots: ChatbotsService,
   ) {}
 
   @Get('projects/:projectId/conversations')
-  async list(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    return unwrap(
-      await db
-        .from('conversations')
-        .select('id, project_id, title, created_at, updated_at')
-        .eq('project_id', projectId)
-        .order('updated_at', { ascending: false }),
-    );
+  list(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
+    return this.conversations.list(scopeOf(user), projectId);
   }
 
   @Post('projects/:projectId/conversations')
@@ -68,40 +65,20 @@ export class ChatController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() dto: CreateConversationDto,
   ) {
-    const db = this.supabase.forUser(user.accessToken);
-    const project = unwrap(
-      await db.from('projects').select('id, company_id').eq('id', projectId).single(),
-      'Proyecto no encontrado',
-    );
-    return unwrap(
-      await db
-        .from('conversations')
-        .insert({ project_id: project.id, company_id: project.company_id, title: dto.title || DEFAULT_TITLE })
-        .select('id, project_id, title, created_at, updated_at')
-        .single(),
-    );
+    const scope = scopeOf(user);
+    const project = await this.projects.ref(scope, projectId);
+    return this.conversations.create(scope, { projectId: project.id, companyId: project.companyId, title: dto.title || DEFAULT_TITLE });
   }
 
   @Get('conversations/:conversationId/messages')
-  async messages(@CurrentUser() user: AuthUser, @Param('conversationId', ParseUUIDPipe) id: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    return unwrap(
-      await db
-        .from('messages')
-        .select('id, role, content, sources, tool_calls, model_info, created_at, feedback:message_feedback(rating, comment)')
-        .eq('conversation_id', id)
-        .order('created_at', { ascending: true }),
-    );
+  messages(@CurrentUser() user: AuthUser, @Param('conversationId', ParseUUIDPipe) id: string) {
+    return this.conversations.messages(scopeOf(user), id);
   }
 
   @Delete('conversations/:conversationId')
   @HttpCode(204)
   async remove(@CurrentUser() user: AuthUser, @Param('conversationId', ParseUUIDPipe) id: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    unwrap(
-      await db.from('conversations').delete().eq('id', id).select('id').single(),
-      'Conversación no encontrada',
-    );
+    await this.conversations.delete(scopeOf(user), id);
   }
 
   /**
@@ -123,30 +100,13 @@ export class ChatController {
     @Body() dto: SendMessageDto,
     @Res() res: Response,
   ) {
-    const db = this.supabase.forUser(user.accessToken);
+    const scope = scopeOf(user);
     const question = dto.content.trim();
 
     // Validaciones antes de abrir el stream, para responder con códigos HTTP normales.
-    const conversation = unwrap(
-      await db.from('conversations').select('id, project_id, company_id, title').eq('id', conversationId).single(),
-      'Conversación no encontrada',
-    );
-    const previous = unwrap(
-      await db
-        .from('messages')
-        .select('role, content')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: false })
-        .limit(HISTORY_LIMIT),
-    ).reverse() as ChatTurn[];
-
-    unwrap(
-      await db
-        .from('messages')
-        .insert({ conversation_id: conversationId, role: 'user', content: question })
-        .select('id')
-        .single(),
-    );
+    const conversation = await this.conversations.get(scope, conversationId);
+    const previous = await this.conversations.recentTurns(scope, conversationId, HISTORY_LIMIT);
+    await this.conversations.addMessage(scope, { conversationId, role: 'user', content: question });
 
     res.status(200);
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -161,7 +121,7 @@ export class ChatController {
       if (!res.writableEnded) abort.abort();
     });
 
-    const projectId = conversation.project_id as string;
+    const projectId = conversation.project_id;
     const title =
       conversation.title === DEFAULT_TITLE
         ? question.length > 60
@@ -177,29 +137,23 @@ export class ChatController {
       modelInfo: ModelInfo | null,
       cacheMatch: CacheMatch | null,
     ) => {
-      const saved = unwrap(
-        await db
-          .from('messages')
-          .insert({
-            conversation_id: conversationId,
-            role: 'assistant',
-            content: answer,
-            sources,
-            tool_calls: toolCalls,
-            model_info: modelInfo,
-          })
-          .select('id')
-          .single(),
-      );
-      await db.from('conversations').update({ title }).eq('id', conversationId);
-      emit({ type: 'done', messageId: saved.id, title, cached, cacheMatch });
+      const messageId = await this.conversations.addMessage(scope, {
+        conversationId,
+        role: 'assistant',
+        content: answer,
+        sources,
+        toolCalls,
+        modelInfo,
+      });
+      await this.conversations.rename(scope, conversationId, title);
+      emit({ type: 'done', messageId, title, cached, cacheMatch });
     };
 
     let answer = '';
     try {
-      const bot = this.chatbots.profile(await this.chatbots.findByProject(db, projectId), 'internal');
+      const bot = this.chatbots.profile(await this.chatbots.findByProject(scope, projectId), 'internal');
       const result = await this.engine.ask(
-        { db, projectId, companyId: conversation.company_id, question, history: previous, bot, emit, signal: abort.signal, channel: 'app' },
+        { scope, projectId, companyId: conversation.company_id, question, history: previous, bot, emit, signal: abort.signal, channel: 'app' },
         (partial) => (answer = partial),
       );
       answer = result.answer;
@@ -215,9 +169,9 @@ export class ChatController {
         });
       }
       if (answer) {
-        await db
-          .from('messages')
-          .insert({ conversation_id: conversationId, role: 'assistant', content: `${answer}\n\n_(respuesta incompleta)_` });
+        await this.conversations
+          .addMessage(scope, { conversationId, role: 'assistant', content: `${answer}\n\n_(respuesta incompleta)_` })
+          .catch(() => undefined);
       }
     } finally {
       res.end();

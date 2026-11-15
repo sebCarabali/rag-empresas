@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
-import { SupabaseAuthGuard } from './interfaces/http/auth/auth.guard';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { DomainErrorFilter } from './interfaces/http/domain-error.filter';
+import { AuthGuard } from './interfaces/http/auth/auth.guard';
 import { ChatController } from './interfaces/http/chat/chat.controller';
 import { ChatbotsController } from './interfaces/http/chatbots/chatbots.controller';
 import { WidgetController } from './interfaces/http/chatbots/widget.controller';
@@ -22,6 +23,9 @@ import { CoreModule } from './composition/core.module';
 @Module({
   imports: [CoreModule, ApplicationModule],
   controllers: [HealthController, CompaniesController, ProjectsController, DocumentsController, ChatController, EnrichmentsController, ChatbotsController, WidgetController, EvalsController, FeedbackController, UsageController, ApiKeysController, PublicApiController, ReindexController, ModelsController],
-  providers: [{ provide: APP_GUARD, useClass: SupabaseAuthGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_FILTER, useClass: DomainErrorFilter },
+  ],
 })
 export class AppModule {}

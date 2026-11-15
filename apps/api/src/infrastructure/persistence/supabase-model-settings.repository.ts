@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DEFAULT_MODEL_SETTINGS, LLM_PROVIDERS, type LlmProvider, type ModelSettings } from '../../domain/models/catalog';
-import type { ModelSettingsRepository, ProviderCredential } from '../../application/ports';
+import { DEFAULT_CHATBOT } from '../../domain/chatbots/chatbot';
+import { ForbiddenError } from '../../domain/errors';
+import type { DataScope, ModelSettingsRepository, ProjectRef, ProviderCredential } from '../../application/ports';
 import { SupabaseService } from '../supabase/supabase.service';
+import { check } from './supabase-result';
 
 /** Fila de chatbots → configuración de modelos. */
 export function toSettings(row: Record<string, unknown> | null | undefined): ModelSettings {
@@ -15,7 +18,7 @@ export function toSettings(row: Record<string, unknown> | null | undefined): Mod
   };
 }
 
-export const MODEL_COLUMNS = 'llm_provider, llm_model, llm_fallback, llm_fallback_model, embedding_model';
+const MODEL_COLUMNS = 'llm_provider, llm_model, llm_fallback, llm_fallback_model, embedding_model';
 
 /** Adaptador (Repository) sobre las tablas chatbots y chatbot_secrets. */
 @Injectable()
@@ -43,5 +46,27 @@ export class SupabaseModelSettingsRepository implements ModelSettingsRepository 
       out[p] = { configured: Boolean(last4), last4, updatedAt: row[`${p}_key_updated_at`] ?? null };
     }
     return out;
+  }
+
+  async save(scope: DataScope, project: ProjectRef, settings: ModelSettings): Promise<void> {
+    const db = this.supabase.client(scope);
+    const values = {
+      llm_provider: settings.llmProvider,
+      llm_model: settings.llmModel,
+      llm_fallback: settings.llmFallback,
+      llm_fallback_model: settings.llmFallbackModel,
+      embedding_model: settings.embeddingModel,
+    };
+    const { data: existing, error: findError } = await db.from('chatbots').select('id').eq('project_id', project.id).maybeSingle();
+    check(findError);
+    const { data, error } = existing
+      ? await db.from('chatbots').update(values).eq('id', existing.id).select('id').maybeSingle()
+      : await db
+          .from('chatbots')
+          .insert({ ...DEFAULT_CHATBOT, ...values, project_id: project.id, company_id: project.companyId })
+          .select('id')
+          .maybeSingle();
+    if (error?.code === '42501' || (!error && !data)) throw new ForbiddenError('Solo owner o admin pueden cambiar los modelos');
+    check(error);
   }
 }
