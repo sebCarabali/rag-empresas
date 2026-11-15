@@ -17,12 +17,14 @@ const KEY_CONSOLE: Record<LlmProvider, string> = {
   gemini: 'https://aistudio.google.com/apikey',
   openai: 'https://platform.openai.com/api-keys',
   groq: 'https://console.groq.com/keys',
+  mistral: 'https://console.mistral.ai/api-keys',
 };
 
 const PROVIDER_BLURB: Record<LlmProvider, string> = {
   gemini: 'Buena relación calidad/precio y uso de herramientas del catálogo.',
   groq: 'Respuestas muy rápidas con modelos abiertos.',
   openai: 'Modelos GPT de OpenAI.',
+  mistral: 'Modelos europeos multilingües, buenos con herramientas.',
 };
 
 const hasKey = (p?: ProviderOption) => Boolean(p?.configured);
@@ -338,7 +340,7 @@ export function ModelsPanel({ projectId }: { projectId: string }) {
           <h2 className="font-semibold">Modelo de lenguaje</h2>
           <p className="mt-1 text-sm text-muted">El que redacta las respuestas en el chat, el widget y la API.</p>
         </div>
-        <div role="radiogroup" aria-label="Proveedor" className="grid gap-2 sm:grid-cols-3">
+        <div role="radiogroup" aria-label="Proveedor" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {config.providers.map((p) => {
             const blocked = !hasKey(p);
             return (

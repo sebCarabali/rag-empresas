@@ -220,7 +220,7 @@ export function UsageTab({ projectId }: { projectId: string }) {
         <p className="max-w-2xl text-sm text-muted">
           De dónde salieron las respuestas y cuánto costaron. El gasto es un estimado con los precios públicos por token
           {report &&
-            ` (Gemini US$ ${report.prices.gemini.input}/${report.prices.gemini.output}, Groq US$ ${report.prices.groq.input}/${report.prices.groq.output}${report.prices.openai ? ` y OpenAI US$ ${report.prices.openai.input}/${report.prices.openai.output}` : ''} por millón de tokens de entrada/salida)`};
+            ` (Gemini US$ ${report.prices.gemini.input}/${report.prices.gemini.output}, Groq US$ ${report.prices.groq.input}/${report.prices.groq.output}${report.prices.openai ? `, OpenAI US$ ${report.prices.openai.input}/${report.prices.openai.output}` : ''}${report.prices.mistral ? ` y Mistral US$ ${report.prices.mistral.input}/${report.prices.mistral.output}` : ''} por millón de tokens de entrada/salida)`};
           no incluye el cargo aparte de la búsqueda de Google de las descripciones web.
         </p>
         <select

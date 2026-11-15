@@ -2,6 +2,16 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.22.0] - 2026-11-15
+
+### Agregado
+
+- Mistral como proveedor de lenguaje (`mistral-medium-latest`, `mistral-small-latest`, `mistral-large-latest`; con herramientas del catálogo) y de embeddings (`mistral-embed`, 1024 dimensiones), con su clave por asistente en Vault.
+
+### Cambiado
+
+- La API se reorganizó en arquitectura hexagonal (dominio, aplicación con puertos, infraestructura con adaptadores, interfaces HTTP y raíz de composición) siguiendo SOLID, con patrones Strategy, Registry, Decorator, Chain of Responsibility, Abstract Factory, Repository, Adapter y Facade. Ver `docs/arquitectura-api.md`. Sin cambios en los endpoints.
+
 ## [0.21.0] - 2026-11-15
 
 ### Cambiado
