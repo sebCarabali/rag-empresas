@@ -1,4 +1,3 @@
-import type { FunctionDeclaration } from '@google/genai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Source } from '../../domain/chat/prompt';
 
@@ -11,13 +10,10 @@ interface CatalogField {
   ejemplos: string[] | null;
 }
 
-export interface CatalogToolCall {
-  name: string;
-  args: Record<string, unknown>;
-  total: number | null;
-  summary: string;
-  error?: string;
-}
+import type { CatalogToolCall } from '../../application/ports';
+import type { ToolDeclaration } from '../../domain/llm/llm';
+
+export type { CatalogToolCall };
 
 const OPERATORS = ['igual', 'contiene', 'no_contiene', 'menor', 'menor_o_igual', 'mayor', 'mayor_o_igual'];
 const OP_LABEL: Record<string, string> = {
@@ -35,7 +31,7 @@ const MAX_PRODUCTS_AS_SOURCES = 10;
 
 export interface CatalogContext {
   totalProducts: number;
-  declarations: FunctionDeclaration[];
+  declarations: ToolDeclaration[];
   instructions: string;
 }
 
@@ -80,7 +76,7 @@ export async function loadCatalogContext(db: SupabaseClient, projectId: string):
     },
   };
 
-  const declarations: FunctionDeclaration[] = [
+  const declarations: ToolDeclaration[] = [
     {
       name: 'contar_productos',
       description:

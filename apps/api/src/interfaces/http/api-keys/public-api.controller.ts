@@ -10,12 +10,12 @@ import {
   Res,
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { MissingModelKeyError } from '../../../infrastructure/secrets/vault-provider-key-store';
+import { MissingModelKeyError } from '../../../domain/llm/llm';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import type { Response } from 'express';
 import { Public } from '../auth/auth.guard';
 import { ChatEngineService } from '../../../application/chat/chat-engine.service';
-import type { ChatTurn } from '../../../infrastructure/llm/gemini-chat-model';
+import type { ChatTurn } from '../../../domain/llm/llm';
 import { ChatbotsService } from '../../../application/chatbots/chatbots.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ApiKeysService, TOKEN_MAX_TTL, type ApiKeyContext } from '../../../application/api-keys/api-keys.service';

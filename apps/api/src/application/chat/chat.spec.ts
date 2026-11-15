@@ -1,8 +1,9 @@
 import 'reflect-metadata';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { AnswerCacheService } from '../../infrastructure/persistence/supabase-answer-cache';
-import { GeminiService, type GeminiEvent } from '../../infrastructure/llm/gemini-chat-model';
+import { isFollowUp, normalizeQuestion } from '../../domain/cache/questions';
+import { GeminiChatModel } from '../../infrastructure/llm/gemini-chat-model';
+import type { ModelEvent } from '../../domain/llm/llm';
 import { diversify, type RetrievedChunk } from '../../domain/chat/prompt';
 
 function chunk(id: string, title: string, format?: string): RetrievedChunk {
@@ -35,8 +36,8 @@ test('diversify: completa con descartados si no alcanza y no limita textos', () 
 
 test('normalizeQuestion ignora tildes, mayúsculas y signos', () => {
   assert.equal(
-    AnswerCacheService.normalizeQuestion('¿Cuántas telas de ALGODÓN hay?'),
-    AnswerCacheService.normalizeQuestion('cuantas telas de algodon hay'),
+    normalizeQuestion('¿Cuántas telas de ALGODÓN hay?'),
+    normalizeQuestion('cuantas telas de algodon hay'),
   );
 });
 
@@ -47,8 +48,8 @@ function fakeGemini(rounds: Array<Array<Record<string, unknown>>>) {
   process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'sb_secret_test';
   process.env.GEMINI_API_KEY ??= 'x';
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { AppConfig } = require('../../infrastructure/config/app-config');
-  const service = new GeminiService(new AppConfig());
+  const { AppConfig } = require('../../config/app-config');
+  const service = new GeminiChatModel(new AppConfig());
   const requests: Array<Record<string, unknown>> = [];
   const fake = {
     models: {
@@ -71,11 +72,11 @@ test('Gemini: ejecuta la herramienta, devuelve el resultado y luego responde', a
     [{ text: 'Hay ' }, { text: '722 telas.' }],
   ]);
   const executed: string[] = [];
-  const events: GeminiEvent[] = [];
-  for await (const e of service.run('sys', [{ role: 'user', content: 'cuántas' }], {
+  const events: ModelEvent[] = [];
+  for await (const e of service.stream({ systemInstruction: 'sys', turns: [{ role: 'user', content: 'cuántas' }], model: 'gemini-test',
     apiKey: 'k',
     tools: [{ name: 'contar_productos' }],
-    execute: async (name) => {
+    execute: async (name: string) => {
       executed.push(name);
       return { total: 722 };
     },
@@ -96,7 +97,7 @@ test('Gemini: tras el máximo de rondas fuerza la respuesta sin herramientas', a
   const call = [{ functionCall: { name: 'contar_productos', args: {} } }];
   const { service, requests } = fakeGemini([call, call, call, call, [{ text: 'listo' }]]);
   let text = '';
-  for await (const e of service.run('sys', [{ role: 'user', content: 'x' }], {
+  for await (const e of service.stream({ systemInstruction: 'sys', turns: [{ role: 'user', content: 'x' }], model: 'gemini-test',
     apiKey: 'k',
     tools: [{ name: 'contar_productos' }],
     execute: async () => ({ total: 1 }),
@@ -117,7 +118,7 @@ test('Gemini: si termina sin texto, insiste una vez y luego falla para que respo
   const call = [{ functionCall: { name: 'contar_productos', args: {} } }];
   const ok = fakeGemini([call, [], [{ text: 'Hay 166 telas.' }]]);
   let text = '';
-  for await (const e of ok.service.run('sys', [{ role: 'user', content: 'x' }], {
+  for await (const e of ok.service.stream({ systemInstruction: 'sys', turns: [{ role: 'user', content: 'x' }], model: 'gemini-test',
     apiKey: 'k',
     tools: [{ name: 'contar_productos' }],
     execute: async () => ({ total: 166 }),
@@ -129,14 +130,14 @@ test('Gemini: si termina sin texto, insiste una vez y luego falla para que respo
 
   const empty = fakeGemini([[], []]);
   await assert.rejects(async () => {
-    for await (const _ of empty.service.run('sys', [{ role: 'user', content: 'x' }], { apiKey: 'k' })) void _;
+    for await (const _ of empty.service.stream({ systemInstruction: 'sys', turns: [{ role: 'user', content: 'x' }], model: 'gemini-test', apiKey: 'k' })) void _;
   }, /no generó texto/);
 });
 
 test('Gemini: no reenvía el texto de "pensamiento" al usuario', async () => {
   const { service } = fakeGemini([[{ text: 'razonando…', thought: true }, { text: 'respuesta' }]]);
   let text = '';
-  for await (const e of service.run('sys', [{ role: 'user', content: 'x' }], { apiKey: 'k' })) if (e.type === 'text') text += e.text;
+  for await (const e of service.stream({ systemInstruction: 'sys', turns: [{ role: 'user', content: 'x' }], model: 'gemini-test', apiKey: 'k' })) if (e.type === 'text') text += e.text;
   assert.equal(text, 'respuesta');
 });
 
@@ -205,7 +206,7 @@ test('loadEnrichments: prioriza lo mencionado en la pregunta y lo presente en lo
 });
 
 test('isFollowUp: la primera pregunta nunca es de seguimiento', () => {
-  assert.equal(AnswerCacheService.isFollowUp('¿y en tejido plano?', false), false);
+  assert.equal(isFollowUp('¿y en tejido plano?', false), false);
 });
 
 test('isFollowUp: detecta preguntas que dependen de la conversación', () => {
@@ -219,7 +220,7 @@ test('isFollowUp: detecta preguntas que dependen de la conversación', () => {
     'Compara las dos primeras',
     '¿Por qué?',
   ]) {
-    assert.equal(AnswerCacheService.isFollowUp(q, true), true, q);
+    assert.equal(isFollowUp(q, true), true, q);
   }
 });
 
@@ -231,6 +232,6 @@ test('isFollowUp: las preguntas que se entienden solas sí usan caché', () => {
     'Telas florales en punto de Modateks',
     '¿Cómo se lava el lino?',
   ]) {
-    assert.equal(AnswerCacheService.isFollowUp(q, true), false, q);
+    assert.equal(isFollowUp(q, true), false, q);
   }
 });

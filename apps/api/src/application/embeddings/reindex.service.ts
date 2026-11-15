@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../../infrastructure/config/app-config';
+import { AppConfig } from '../../config/app-config';
 import { ModelSettingsService } from '../models/model-settings.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
-import { EmbeddingsService, toPgVector } from './embeddings.service';
+import { toPgVector } from '../../infrastructure/persistence/pg-vector';
+import { EmbeddingsService } from './embeddings.service';
 
 export interface ReembedJob {
   kind: 'reembed';

@@ -1,13 +1,12 @@
 import 'reflect-metadata';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { cacheModelKey, ModelSettingsService, toSettings } from './model-settings.service';
-import { MissingModelKeyError } from '../../infrastructure/secrets/vault-provider-key-store';
+import { cacheModelKey, MissingModelKeyError } from '../../domain/llm/llm';
+import { toSettings } from '../../infrastructure/persistence/supabase-model-settings.repository';
+import { ModelSettingsService } from './model-settings.service';
 
 const config = {
-  geminiModel: 'gemini-base',
-  groqModel: 'groq-base',
-  openaiModel: 'openai-base',
+  defaultModels: { gemini: 'gemini-base', groq: 'groq-base', openai: 'openai-base', mistral: 'mistral-base' },
   embeddingModel: 'Xenova/multilingual-e5-base',
   llmFallback: true,
 } as never;
@@ -15,7 +14,7 @@ const config = {
 /** Claves guardadas en el asistente (la plataforma no aporta ninguna). */
 function service(projectKeys: Record<string, string>) {
   const keys = { getKey: async (_p: string, provider: string) => projectKeys[provider] ?? null };
-  return new ModelSettingsService({} as never, keys as never, config);
+  return new ModelSettingsService({ find: async () => toSettings(null) } as never, keys as never, config);
 }
 
 test('toSettings usa los valores por defecto sin fila (sin respaldo)', () => {
@@ -51,4 +50,9 @@ test('ruta: respaldo sin clave, igual al principal o "none" se omite', async () 
 test('cacheModelKey conserva el formato anterior para Gemini', () => {
   assert.equal(cacheModelKey({ provider: 'gemini', model: 'gemini-3.5-flash' }), 'gemini-3.5-flash');
   assert.equal(cacheModelKey({ provider: 'openai', model: 'gpt-5.4-mini' }), 'openai:gpt-5.4-mini');
+});
+
+test('Mistral usa su modelo por defecto con la clave del asistente', async () => {
+  const route = await service({ mistral: 'm-key' }).route('p', { ...toSettings(null), llmProvider: 'mistral' });
+  assert.deepEqual(route.primary, { provider: 'mistral', model: 'mistral-base', apiKey: 'm-key', keyOwner: 'company' });
 });

@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AnswerCacheService } from '../../infrastructure/persistence/supabase-answer-cache';
+import { normalizeQuestion } from '../../domain/cache/questions';
 import { ChatEngineService } from '../chat/chat-engine.service';
 import { ChatbotsService } from '../chatbots/chatbots.service';
-import { AppConfig } from '../../infrastructure/config/app-config';
+import { AppConfig } from '../../config/app-config';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 
 export interface WarmJob {
@@ -78,7 +78,7 @@ export class CacheWarmService {
 
     const seen = new Set<string>();
     return list.filter((w) => {
-      const id = `${w.audience}|${AnswerCacheService.normalizeQuestion(w.question)}`;
+      const id = `${w.audience}|${normalizeQuestion(w.question)}`;
       if (seen.has(id)) return false;
       seen.add(id);
       return true;
@@ -183,7 +183,7 @@ export class CacheWarmService {
 export function topQuestions(questions: string[], limit: number): string[] {
   const counts = new Map<string, { text: string; n: number }>();
   for (const q of questions) {
-    const key = AnswerCacheService.normalizeQuestion(q ?? '');
+    const key = normalizeQuestion(q ?? '');
     if (key.split(' ').length < 3) continue; // demasiado corta para entenderse sola
     const entry = counts.get(key) ?? { text: q.trim(), n: 0 };
     entry.n++;

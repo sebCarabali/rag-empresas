@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QueueClient } from '@vercel/queue';
-import { AppConfig } from '../config/app-config';
+import { AppConfig } from '../../config/app-config';
+import type { JobQueue } from '../../application/ports';
 import { ReindexService, type ReembedJob } from '../../application/embeddings/reindex.service';
 import { EnrichmentService, type EnrichJob } from '../../application/enrichment/enrichment.service';
 import { EvalRunnerService, type EvalJob } from '../../application/evals/eval-runner.service';
@@ -49,7 +50,7 @@ export const MAX_DELIVERIES = 4;
  * proceso para poder desarrollar sin desplegar.
  */
 @Injectable()
-export class IngestionQueueService {
+export class IngestionQueueService implements JobQueue {
   private readonly logger = new Logger(IngestionQueueService.name);
   private _client?: QueueClient;
 

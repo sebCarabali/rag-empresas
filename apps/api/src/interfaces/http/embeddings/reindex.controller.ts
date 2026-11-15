@@ -1,7 +1,7 @@
 import { ConflictException, Controller, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../supabase-error';
-import { AppConfig } from '../../../infrastructure/config/app-config';
+import { AppConfig } from '../../../config/app-config';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ReindexService } from '../../../application/embeddings/reindex.service';
 

@@ -1,25 +1,11 @@
-import {
-  BadRequestException,
-  Body,
-  ConflictException,
-  Controller,
-  Delete,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  InternalServerErrorException,
-  Logger,
-  Param,
-  ParseUUIDPipe,
-  Post,
-} from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Inject, InternalServerErrorException, Logger, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { IsIn, IsInt, IsString, Length, Max, Min } from 'class-validator';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../supabase-error';
-import { AppConfig } from '../../../infrastructure/config/app-config';
-import { SUPPORTED_MIME_TYPES } from '../../../infrastructure/extraction/text-extractor';
-import { IngestionQueueService } from '../../../infrastructure/queue/ingestion-queue.service';
+import { AppConfig } from '../../../config/app-config';
+import { SUPPORTED_MIME_TYPES } from '../../../domain/ingestion/documents';
+import { JOB_QUEUE, type JobQueue } from '../../../application/ports';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 class CreateDocumentDto {
@@ -60,7 +46,7 @@ export class DocumentsController {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
-    private readonly queue: IngestionQueueService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   @Get('projects/:projectId/documents')

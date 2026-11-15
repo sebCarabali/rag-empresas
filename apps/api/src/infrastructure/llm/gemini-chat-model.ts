@@ -7,21 +7,10 @@ import {
   type FunctionDeclaration,
   type Part,
 } from '@google/genai';
-import { AppConfig } from '../config/app-config';
-import { geminiUsage } from '../../application/usage/usage.service';
-
-export interface ChatTurn {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-export type ToolExecutor = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
-
-export type GeminiEvent =
-  | { type: 'text'; text: string }
-  | { type: 'tool'; name: string; args: Record<string, unknown>; result: Record<string, unknown> }
-  /** Tokens de una llamada al modelo (una por ronda). */
-  | { type: 'usage'; input: number; output: number };
+import type { ChatModel, ChatRequest } from '../../application/ports';
+import { EmptyAnswerError, type ModelEvent } from '../../domain/llm/llm';
+import { AppConfig } from '../../config/app-config';
+import { geminiUsage } from './gemini-usage';
 
 /** Rondas máximas de llamadas a herramientas antes de forzar la respuesta final. */
 const MAX_TOOL_ROUNDS = 4;
@@ -29,13 +18,6 @@ const MAX_TOOL_ROUNDS = 4;
 /** Indicación que se agrega cuando el modelo debe responder ya, sin más consultas. */
 const ANSWER_NOW =
   'Con la información anterior, responde ahora la pregunta del usuario en texto, sin hacer más consultas.';
-
-/** Gemini terminó sin escribir texto (solo consultas o una respuesta vacía). */
-export class GeminiEmptyAnswerError extends Error {
-  constructor() {
-    super('Gemini no generó texto en la respuesta');
-  }
-}
 
 /** Clientes reutilizables por clave (la de cada asistente). */
 const clients = new Map<string, GoogleGenAI>();
@@ -51,8 +33,11 @@ export function geminiClient(apiKey: string): GoogleGenAI {
   return client;
 }
 
+/** Adaptador (Strategy) del puerto ChatModel para la API de Gemini. */
 @Injectable()
-export class GeminiService {
+export class GeminiChatModel implements ChatModel {
+  readonly provider = 'gemini' as const;
+
   constructor(private readonly config: AppConfig) {}
 
   /** Cliente para una clave (se reemplaza en pruebas). */
@@ -63,18 +48,16 @@ export class GeminiService {
    * llamarlas (p. ej. filtros exactos sobre el catálogo); se ejecutan y su
    * resultado vuelve al modelo hasta que produce la respuesta final.
    */
-  async *run(
-    systemInstruction: string,
-    turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; apiKey: string; model?: string },
-  ): AsyncGenerator<GeminiEvent> {
+  async *stream(options: ChatRequest): AsyncGenerator<ModelEvent> {
+    const { systemInstruction, turns } = options;
+    const tools = options.tools as FunctionDeclaration[] | undefined;
     // Siempre con la clave del asistente: la plataforma no aporta claves.
     const ai = this.client(options.apiKey);
     const contents: Content[] = turns.map((t) => ({
       role: t.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: t.content }],
     }));
-    const hasTools = Boolean(options.tools?.length && options.execute);
+    const hasTools = Boolean(tools?.length && options.execute);
 
     let wroteText = false;
     let emptyRetried = false;
@@ -88,7 +71,7 @@ export class GeminiService {
         config: {
           systemInstruction,
           abortSignal: options.signal,
-          ...(hasTools ? { tools: [{ functionDeclarations: options.tools }] } : {}),
+          ...(hasTools ? { tools: [{ functionDeclarations: tools }] } : {}),
           ...(finalRound ? { toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } } : {}),
         },
       });
@@ -116,7 +99,7 @@ export class GeminiService {
         if (wroteText) return;
         // Respuesta vacía: se insiste una vez pidiendo el texto; si sigue vacía es un
         // fallo y responden el respaldo o la caché.
-        if (emptyRetried) throw new GeminiEmptyAnswerError();
+        if (emptyRetried) throw new EmptyAnswerError('gemini');
         emptyRetried = true;
         if (modelParts.length && calls.length === 0) contents.push({ role: 'model', parts: modelParts });
         contents.push({ role: 'user', parts: [{ text: ANSWER_NOW }] });

@@ -1,8 +1,8 @@
-import { BadRequestException, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Get, Inject, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../supabase-error';
-import { AppConfig } from '../../../infrastructure/config/app-config';
-import { IngestionQueueService } from '../../../infrastructure/queue/ingestion-queue.service';
+import { AppConfig } from '../../../config/app-config';
+import { JOB_QUEUE, type JobQueue } from '../../../application/ports';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 const WARM_COLUMNS = 'id, status, trigger, total, done, generated, error, created_at, finished_at';
@@ -22,7 +22,7 @@ function validTimeZone(tz?: string): string {
 export class UsageController {
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly queue: IngestionQueueService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
     private readonly config: AppConfig,
   ) {}
 

@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { orderByScores, RerankerService } from './transformers-reranker';
+import { orderByScores, TransformersReranker } from './transformers-reranker';
 
 const config = (over: Record<string, unknown> = {}) =>
   ({ reranker: { enabled: true, timeoutMs: 200, ...over } }) as never;
@@ -22,7 +22,7 @@ test('orderByScores ordena por puntuación y conserva el orden en empates', () =
 });
 
 test('reordena los candidatos según el modelo', async () => {
-  const svc = new RerankerService(config());
+  const svc = new TransformersReranker(config());
   svc.scorerOverride = async (_q, passages) => passages.map((p) => (p.includes('algodón') ? 5 : p.includes('devol') ? 1 : -2));
   const r = await svc.rerank('¿Qué telas de algodón hay?', chunks);
   assert.equal(r.reranked, true);
@@ -33,7 +33,7 @@ test('reordena los candidatos según el modelo', async () => {
 });
 
 test('procesa en lotes y conserva la correspondencia', async () => {
-  const svc = new RerankerService(config());
+  const svc = new TransformersReranker(config());
   const calls: number[] = [];
   svc.scorerOverride = async (_q, passages) => {
     calls.push(passages.length);
@@ -47,7 +47,7 @@ test('procesa en lotes y conserva la correspondencia', async () => {
 });
 
 test('si falla o tarda demasiado, devuelve el orden original', async () => {
-  const failing = new RerankerService(config());
+  const failing = new TransformersReranker(config());
   failing.scorerOverride = async () => {
     throw new Error('sin modelo');
   };
@@ -55,7 +55,7 @@ test('si falla o tarda demasiado, devuelve el orden original', async () => {
   assert.equal(r1.reranked, false);
   assert.deepEqual(r1.items, chunks);
 
-  const slow = new RerankerService(config({ timeoutMs: 20 }));
+  const slow = new TransformersReranker(config({ timeoutMs: 20 }));
   slow.scorerOverride = () => new Promise((resolve) => setTimeout(() => resolve([1, 2, 3]), 200));
   const r2 = await slow.rerank('q', chunks);
   assert.equal(r2.reranked, false);
@@ -63,7 +63,7 @@ test('si falla o tarda demasiado, devuelve el orden original', async () => {
 });
 
 test('desactivado no llama al modelo', async () => {
-  const svc = new RerankerService(config({ enabled: false }));
+  const svc = new TransformersReranker(config({ enabled: false }));
   svc.scorerOverride = async () => assert.fail('no debe llamarse');
   const r = await svc.rerank('q', chunks);
   assert.equal(r.reranked, false);

@@ -1,39 +1,23 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { geminiClient } from '../llm/gemini-chat-model';
-import { AppConfig } from '../config/app-config';
+import { Injectable } from '@nestjs/common';
+import { PROVIDER_LABEL, type LlmProvider } from '../../domain/models/catalog';
+import { MissingModelKeyError } from '../../domain/llm/llm';
+import type { ProviderKeyReader } from '../../application/ports';
 import { SupabaseService } from '../supabase/supabase.service';
-import { OPENAI_COMPATIBLE_BASE, PROVIDER_LABEL, type LlmProvider } from '../../domain/models/catalog';
 
 /** Cuánto se recuerda en memoria la clave descifrada antes de volver a leer el Vault. */
 const CACHE_TTL_MS = 5 * 60_000;
 
-/** El asistente no tiene la clave que hace falta. El mensaje se puede mostrar al equipo de la empresa. */
-export class MissingModelKeyError extends Error {
-  constructor(
-    readonly provider: LlmProvider,
-    purpose = 'responder',
-  ) {
-    super(`Este asistente no tiene clave de ${PROVIDER_LABEL[provider]} para ${purpose}. Configúrala en Asistente y widget → Modelos.`);
-  }
-}
-
 /**
- * Claves de API de cada asistente (Gemini, OpenAI, Groq). Las pone la empresa
- * en la configuración del asistente; la plataforma no aporta claves. Se
- * guardan cifradas en Supabase Vault; aquí solo se leen (service_role) para
- * usarlas en el servidor y nunca se devuelven al navegador.
+ * Adaptador del puerto ProviderKeyReader sobre Supabase Vault: lee (con
+ * service_role) las claves que la empresa guardó en cada asistente. Nunca las
+ * devuelve al navegador.
  */
 @Injectable()
-export class ProjectKeysService {
-  private readonly logger = new Logger(ProjectKeysService.name);
+export class VaultProviderKeyStore implements ProviderKeyReader {
   private readonly cache = new Map<string, { key: string | null; expires: number }>();
 
-  constructor(
-    private readonly supabase: SupabaseService,
-    private readonly config: AppConfig,
-  ) {}
+  constructor(private readonly supabase: SupabaseService) {}
 
-  /** Clave del asistente del proyecto para el proveedor, o null si no la configuró. */
   async getKey(projectId: string, provider: LlmProvider): Promise<string | null> {
     const id = `${projectId}:${provider}`;
     const cached = this.cache.get(id);
@@ -50,7 +34,6 @@ export class ProjectKeysService {
     return key;
   }
 
-  /** Como getKey, pero falla con un mensaje claro si no hay clave. */
   async requireKey(projectId: string, provider: LlmProvider, purpose?: string): Promise<string> {
     const key = await this.getKey(projectId, provider);
     if (!key) throw new MissingModelKeyError(provider, purpose);
@@ -59,36 +42,5 @@ export class ProjectKeysService {
 
   invalidate(projectId: string): void {
     for (const id of this.cache.keys()) if (id.startsWith(`${projectId}:`)) this.cache.delete(id);
-  }
-
-  /** Comprueba que la clave funcione antes de guardarla. */
-  async validateKey(provider: LlmProvider, apiKey: string): Promise<void> {
-    const label = PROVIDER_LABEL[provider];
-    if (provider === 'gemini') {
-      try {
-        await geminiClient(apiKey).models.get({ model: this.config.geminiModel });
-        return;
-      } catch (err) {
-        const msg = (err as Error).message ?? String(err);
-        if (/api key|401|403|permission|invalid/i.test(msg)) {
-          throw new BadRequestException('Gemini rechazó la clave: revisa que esté completa y activa.');
-        }
-        if (/404|not found/i.test(msg)) return; // la clave sirve; el modelo se elige aparte
-        throw new BadRequestException(`No se pudo verificar la clave con Gemini: ${msg.slice(0, 200)}`);
-      }
-    }
-    let res: Response;
-    try {
-      res = await fetch(`${OPENAI_COMPATIBLE_BASE[provider]}/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (err) {
-      throw new BadRequestException(`No se pudo verificar la clave con ${label}: ${(err as Error).message}`);
-    }
-    if (res.status === 401 || res.status === 403) {
-      throw new BadRequestException(`${label} rechazó la clave: revisa que esté completa y activa.`);
-    }
-    if (!res.ok) throw new BadRequestException(`No se pudo verificar la clave con ${label} (error ${res.status}).`);
   }
 }

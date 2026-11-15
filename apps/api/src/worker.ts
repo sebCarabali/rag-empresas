@@ -1,12 +1,12 @@
 import 'reflect-metadata';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { IngestionModule } from './composition/application.module';
+import { ApplicationModule } from './composition/application.module';
 import { IngestionQueueService } from './infrastructure/queue/ingestion-queue.service';
 import { CoreModule } from './composition/core.module';
 
 /** Módulo mínimo del worker: sin controladores HTTP, solo los servicios de ingesta. */
-@Module({ imports: [CoreModule, IngestionModule] })
+@Module({ imports: [CoreModule, ApplicationModule] })
 class WorkerModule {}
 
 type NodeConsumer = ReturnType<IngestionQueueService['createNodeConsumer']>;

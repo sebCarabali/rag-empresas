@@ -1,26 +1,6 @@
-export interface TextSection {
-  text: string;
-  /** Número de página (PDF), si aplica. */
-  page?: number;
-}
+import { UnsupportedFileError, type TextSection } from '../../domain/ingestion/documents';
 
-export const SUPPORTED_MIME_TYPES: Record<string, string> = {
-  'application/pdf': 'PDF',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word (.docx)',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel (.xlsx)',
-  'text/plain': 'Texto',
-  'text/markdown': 'Markdown',
-  'text/csv': 'CSV',
-  'image/png': 'Imagen PNG',
-  'image/jpeg': 'Imagen JPG',
-  'image/webp': 'Imagen WebP',
-};
-
-/** Tablas: se procesan por filas (un fragmento por producto) y llenan el catálogo. */
-export const TABULAR_MIME_TYPES = new Set([
-  'text/csv',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-]);
+export { UnsupportedFileError, type TextSection };
 
 /** Si un PDF tiene menos caracteres por página que esto, se considera escaneado y se aplica OCR. */
 const MIN_CHARS_PER_PAGE = 50;
@@ -28,7 +8,6 @@ const MIN_CHARS_PER_PAGE = 50;
 /** Reconocimiento de texto para PDF escaneados e imágenes. */
 export type OcrFn = (buffer: Buffer, mimeType: string) => Promise<TextSection[]>;
 
-export class UnsupportedFileError extends Error {}
 
 /** Extrae el texto de un archivo, separado por página cuando el formato lo permite. */
 export async function extractText(buffer: Buffer, mimeType: string, ocr?: OcrFn): Promise<TextSection[]> {

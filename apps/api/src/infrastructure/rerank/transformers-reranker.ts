@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../config/app-config';
+import { AppConfig } from '../../config/app-config';
+import type { Reranker, RerankResult } from '../../application/ports';
 
 /** Puntúa pares (pregunta, fragmento): devuelve un número por fragmento, mayor = más relevante. */
 export type PairScorer = (query: string, passages: string[]) => Promise<number[]>;
@@ -11,12 +12,6 @@ const BATCH = 10;
 
 let scorerPromise: Promise<PairScorer> | null = null;
 
-export interface RerankResult<T> {
-  items: T[];
-  /** false si no se reordenó (desactivado, sin modelo, error o tiempo agotado). */
-  reranked: boolean;
-  ms: number;
-}
 
 /**
  * Ordena por puntuación descendente; en empate conserva el orden de la
@@ -39,8 +34,8 @@ export function orderByScores<T>(items: T[], scores: number[]): Array<T & { rera
  * más de RERANKER_TIMEOUT_MS, se devuelve el orden original.
  */
 @Injectable()
-export class RerankerService {
-  private readonly logger = new Logger(RerankerService.name);
+export class TransformersReranker implements Reranker {
+  private readonly logger = new Logger(TransformersReranker.name);
   /** Solo para pruebas: reemplaza el modelo. */
   scorerOverride: PairScorer | null = null;
 

@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ChatbotsService, type ChatbotRow } from '../chatbots/chatbots.service';
-import { AppConfig } from '../../infrastructure/config/app-config';
+import { AppConfig } from '../../config/app-config';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 
 const KEY_PREFIX = 'sk_live_';

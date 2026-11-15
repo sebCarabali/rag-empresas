@@ -1,9 +1,9 @@
-import { Body, Controller, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { IsBoolean, IsOptional } from 'class-validator';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../supabase-error';
-import { AppConfig } from '../../../infrastructure/config/app-config';
-import { IngestionQueueService } from '../../../infrastructure/queue/ingestion-queue.service';
+import { AppConfig } from '../../../config/app-config';
+import { JOB_QUEUE, type JobQueue } from '../../../application/ports';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 class RefreshDto {
@@ -18,7 +18,7 @@ export class EnrichmentsController {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: AppConfig,
-    private readonly queue: IngestionQueueService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   /** Descripciones web del proyecto, para revisarlas. */

@@ -1,9 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import type { FunctionDeclaration } from '@google/genai';
-import { AppConfig } from '../config/app-config';
-import type { ChatTurn, GeminiEvent, ToolExecutor } from './gemini-chat-model';
+import type { ChatModel, ChatRequest } from '../../application/ports';
+import type { ModelEvent } from '../../domain/llm/llm';
+import type { OpenAiDialect } from './openai-dialects';
 
-import { OPENAI_COMPATIBLE_BASE } from '../../domain/models/catalog';
 const MAX_TOOL_ROUNDS = 4;
 
 type OpenAiMessage =
@@ -13,7 +11,7 @@ type OpenAiMessage =
       content: string | null;
       tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
     }
-  | { role: 'tool'; tool_call_id: string; content: string };
+  | { role: 'tool'; tool_call_id: string; content: string; name?: string };
 
 interface PendingCall {
   id: string;
@@ -21,29 +19,22 @@ interface PendingCall {
   arguments: string;
 }
 
-/** Proveedor y credenciales de una llamada compatible con OpenAI. */
-export interface OpenAiTarget {
-  provider: 'groq' | 'openai';
-  model: string;
-  apiKey: string;
-}
-
 /**
- * Modelos con API compatible con OpenAI (Groq y OpenAI). Misma interfaz que
- * GeminiService: streaming de texto y llamadas a las herramientas del catálogo.
- * La clave es siempre la del asistente.
+ * Adaptador (Strategy) del puerto ChatModel para APIs compatibles con OpenAI
+ * (OpenAI, Groq, Mistral). Lo que cambia entre ellas está en el dialecto.
+ * Streaming de texto y llamadas a las herramientas del catálogo; la clave es
+ * siempre la del asistente.
  */
-@Injectable()
-export class GroqService {
-  constructor(private readonly config: AppConfig) {}
+export class OpenAiCompatibleChatModel implements ChatModel {
+  readonly provider: OpenAiDialect['provider'];
 
-  async *run(
-    systemInstruction: string,
-    turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; target: OpenAiTarget },
-  ): AsyncGenerator<GeminiEvent> {
-    const { target } = options;
-    const label = target.provider === 'openai' ? 'OpenAI' : 'Groq';
+  constructor(private readonly dialect: OpenAiDialect) {
+    this.provider = dialect.provider;
+  }
+
+  async *stream(options: ChatRequest): AsyncGenerator<ModelEvent> {
+    const { systemInstruction, turns, model, apiKey } = options;
+    const { label, baseUrl } = this.dialect;
     const messages: OpenAiMessage[] = [
       { role: 'system', content: systemInstruction },
       ...turns.map((t) => ({ role: t.role, content: t.content }) as OpenAiMessage),
@@ -61,21 +52,20 @@ export class GroqService {
     for (let round = 0; ; round++) {
       const useTools = hasTools && round < MAX_TOOL_ROUNDS;
       const body: Record<string, unknown> = {
-        model: target.model,
+        model,
         messages,
         stream: true,
-        stream_options: { include_usage: true },
       };
+      if (this.dialect.streamUsage) body.stream_options = { include_usage: true };
       if (useTools) {
         body.tools = tools;
         body.tool_choice = 'auto';
       }
-      // Los modelos gpt-oss razonan antes de responder; "low" mantiene la latencia baja.
-      if (target.model.startsWith('openai/gpt-oss')) body.reasoning_effort = 'low';
+      this.dialect.customize?.(body, model);
 
-      const res = await fetch(`${OPENAI_COMPATIBLE_BASE[target.provider]}/chat/completions`, {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${target.apiKey}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: options.signal,
       });
@@ -96,11 +86,13 @@ export class GroqService {
           yield { type: 'text', text: delta.content };
         }
         for (const tc of delta.tool_calls ?? []) {
-          const current = calls.get(tc.index) ?? { id: '', name: '', arguments: '' };
+          // Mistral manda cada llamada completa y sin "index": cada una es nueva.
+          const index = tc.index ?? calls.size;
+          const current = calls.get(index) ?? { id: '', name: '', arguments: '' };
           if (tc.id) current.id = tc.id;
           if (tc.function?.name) current.name += tc.function.name;
           if (tc.function?.arguments) current.arguments += tc.function.arguments;
-          calls.set(tc.index, current);
+          calls.set(index, current);
         }
       }
 
@@ -122,7 +114,12 @@ export class GroqService {
           result = { error: (err as Error).message };
         }
         yield { type: 'tool', name: call.name, args, result };
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(result),
+          ...(this.dialect.toolResultName ? { name: call.name } : {}),
+        });
       }
     }
   }
@@ -132,7 +129,7 @@ interface SseDelta {
   content?: string | null;
   /** Solo en el último evento (stream_options.include_usage). */
   usage?: { prompt_tokens?: number; completion_tokens?: number };
-  tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
+  tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>;
 }
 
 /** Lee un stream SSE de chat completions y devuelve el "delta" de cada evento. */

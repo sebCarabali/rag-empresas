@@ -1,19 +1,8 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  Param,
-  ParseUUIDPipe,
-  Post,
-  Put,
-} from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsOptional, IsString, Length, MaxLength } from 'class-validator';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../supabase-error';
-import { IngestionQueueService } from '../../../infrastructure/queue/ingestion-queue.service';
+import { JOB_QUEUE, type JobQueue } from '../../../application/ports';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 class EvalCaseDto {
@@ -52,7 +41,7 @@ const clean = (list: string[] | undefined) => [...new Set((list ?? []).map((t) =
 export class EvalsController {
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly queue: IngestionQueueService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   @Get('cases')

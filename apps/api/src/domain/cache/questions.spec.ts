@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { isNegativeAnswer } from './supabase-answer-cache';
+import { isNegativeAnswer } from './questions';
 
 test('detecta respuestas sin información (no se guardan en caché)', () => {
   assert.ok(isNegativeAnswer('En los fragmentos del catálogo no aparecen telas de algodón 100 % para niños.'));

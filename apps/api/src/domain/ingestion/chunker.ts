@@ -1,4 +1,4 @@
-import type { TextSection } from '../../infrastructure/extraction/text-extractor';
+import type { TextSection } from './documents';
 
 export interface Chunk {
   content: string;

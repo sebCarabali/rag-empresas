@@ -15,12 +15,12 @@ import { ModelsController } from './interfaces/http/models/models.controller';
 import { ApiKeysController } from './interfaces/http/api-keys/api-keys.controller';
 import { PublicApiController } from './interfaces/http/api-keys/public-api.controller';
 import { HealthController } from './interfaces/http/health.controller';
-import { IngestionModule } from './composition/application.module';
+import { ApplicationModule } from './composition/application.module';
 import { ProjectsController } from './interfaces/http/projects/projects.controller';
 import { CoreModule } from './composition/core.module';
 
 @Module({
-  imports: [CoreModule, IngestionModule],
+  imports: [CoreModule, ApplicationModule],
   controllers: [HealthController, CompaniesController, ProjectsController, DocumentsController, ChatController, EnrichmentsController, ChatbotsController, WidgetController, EvalsController, FeedbackController, UsageController, ApiKeysController, PublicApiController, ReindexController, ModelsController],
   providers: [{ provide: APP_GUARD, useClass: SupabaseAuthGuard }],
 })

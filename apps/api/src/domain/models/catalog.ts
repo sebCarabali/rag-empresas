@@ -5,19 +5,14 @@
  * uno exige un código distinto (prefijos, tipo de tarea, dimensión).
  */
 
-export type LlmProvider = 'gemini' | 'groq' | 'openai';
-export const LLM_PROVIDERS: LlmProvider[] = ['gemini', 'groq', 'openai'];
-
-/** Endpoints de las APIs compatibles con OpenAI. */
-export const OPENAI_COMPATIBLE_BASE: Record<Exclude<LlmProvider, 'gemini'>, string> = {
-  openai: 'https://api.openai.com/v1',
-  groq: 'https://api.groq.com/openai/v1',
-};
+export type LlmProvider = 'gemini' | 'groq' | 'openai' | 'mistral';
+export const LLM_PROVIDERS: LlmProvider[] = ['gemini', 'groq', 'openai', 'mistral'];
 
 export const PROVIDER_LABEL: Record<LlmProvider, string> = {
   gemini: 'Gemini',
   groq: 'Groq',
   openai: 'OpenAI',
+  mistral: 'Mistral',
 };
 
 /** Modelos sugeridos por proveedor (el primero es el recomendado). */
@@ -38,9 +33,14 @@ export const LLM_SUGGESTIONS: Record<LlmProvider, Array<{ id: string; note: stri
     { id: 'gpt-5.6-luna', note: 'Variante de menor costo de GPT-5.6' },
     { id: 'gpt-5.5', note: 'Más capaz, más caro' },
   ],
+  mistral: [
+    { id: 'mistral-medium-latest', note: 'Equilibrado, buen uso de herramientas (recomendado)' },
+    { id: 'mistral-small-latest', note: 'Rápido y económico' },
+    { id: 'mistral-large-latest', note: 'El más capaz de Mistral' },
+  ],
 };
 
-export type EmbeddingProvider = 'local' | 'gemini' | 'openai';
+export type EmbeddingProvider = 'local' | 'gemini' | 'openai' | 'mistral';
 
 export interface EmbeddingModel {
   id: string;
@@ -85,6 +85,14 @@ export const EMBEDDING_MODELS: EmbeddingModel[] = [
     dimensions: 3072,
     note: 'La mejor calidad de OpenAI. Usa la clave de OpenAI del asistente.',
     pricePerM: 0.13,
+  },
+  {
+    id: 'mistral-embed',
+    label: 'Mistral Embed',
+    provider: 'mistral',
+    dimensions: 1024,
+    note: 'Multilingüe y económico. Usa la clave de Mistral del asistente.',
+    pricePerM: 0.1,
   },
 ];
 

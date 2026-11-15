@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   Get,
   HttpCode,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -13,11 +14,17 @@ import {
 } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, Length, Matches } from 'class-validator';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
-import type { LlmEvent, LlmTarget } from '../../../application/llm/llm.service';
-import { LlmService, describeFailure } from '../../../application/llm/llm.service';
+import { LlmService } from '../../../application/llm/llm.service';
+import { describeFailure, type LlmEvent, type LlmTarget } from '../../../domain/llm/llm';
+import {
+  PROVIDER_KEY_READER,
+  PROVIDER_KEY_VALIDATOR,
+  type ProviderKeyReader,
+  type ProviderKeyValidator,
+} from '../../../application/ports';
 import { DEFAULT_CHATBOT } from '../../../application/chatbots/chatbots.service';
 import { unwrap } from '../supabase-error';
-import { AppConfig } from '../../../infrastructure/config/app-config';
+import { AppConfig } from '../../../config/app-config';
 import { EmbeddingsService } from '../../../application/embeddings/embeddings.service';
 import { ReindexService } from '../../../application/embeddings/reindex.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
@@ -30,10 +37,8 @@ import {
   embeddingModel,
   type LlmProvider,
 } from '../../../domain/models/catalog';
-import { ModelSettingsService, toSettings } from '../../../application/models/model-settings.service';
-import { ProjectKeysService } from '../../../infrastructure/secrets/vault-provider-key-store';
-
-const MODEL_COLUMNS = 'llm_provider, llm_model, llm_fallback, llm_fallback_model, embedding_model';
+import { ModelSettingsService } from '../../../application/models/model-settings.service';
+import { MODEL_COLUMNS, toSettings } from '../../../infrastructure/persistence/supabase-model-settings.repository';
 
 class ModelSettingsDto {
   @IsIn(LLM_PROVIDERS)
@@ -87,7 +92,8 @@ export class ModelsController {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly models: ModelSettingsService,
-    private readonly keys: ProjectKeysService,
+    @Inject(PROVIDER_KEY_READER) private readonly keys: ProviderKeyReader,
+    @Inject(PROVIDER_KEY_VALIDATOR) private readonly validator: ProviderKeyValidator,
     private readonly llm: LlmService,
     private readonly embeddings: EmbeddingsService,
     private readonly reindex: ReindexService,
@@ -244,7 +250,7 @@ export class ModelsController {
     const p = this.provider(provider);
     const { db, canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar las claves');
-    await this.keys.validateKey(p, dto.apiKey.trim());
+    await this.validator.validate(p, dto.apiKey.trim());
     unwrap(
       await db
         .rpc('set_project_provider_key', { p_project_id: projectId, p_provider: p, p_key: dto.apiKey.trim() })

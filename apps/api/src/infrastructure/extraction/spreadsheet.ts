@@ -1,7 +1,7 @@
 import type { Chunk } from '../../domain/ingestion/chunker';
 import { tableToCatalogItems, tableToChunks, type CatalogItem, type Row } from '../../domain/ingestion/csv-catalog';
 
-export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export { XLSX_MIME } from '../../domain/ingestion/documents';
 
 /** Convierte el valor de una celda a texto (fechas en AAAA-MM-DD, números tal cual). */
 function cellToText(value: unknown): string {

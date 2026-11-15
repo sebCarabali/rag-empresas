@@ -1,78 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
-import { AppConfig } from '../config/app-config';
-import { toPgVector } from '../../application/embeddings/embeddings.service';
+import { AppConfig } from '../../config/app-config';
+import { isNegativeAnswer, normalizeQuestion } from '../../domain/cache/questions';
+import type { AnswerCache, CachedAnswer, SemanticFields, SimilarQuestion } from '../../application/ports';
 import { SupabaseService } from '../supabase/supabase.service';
-import { buildVocabulary } from '../../domain/cache/semantic-guard';
-import type { CatalogToolCall } from './catalog-tools';
-import type { ModelInfo } from '../../application/llm/llm.service';
-import type { Source } from '../../domain/chat/prompt';
-
-export interface CachedAnswer {
-  answer: string;
-  sources: Source[];
-  toolCalls: CatalogToolCall[];
-  modelInfo?: ModelInfo | null;
-}
-
-/** Datos para la búsqueda por significado de una entrada. */
-export interface SemanticFields {
-  embedding: number[] | null;
-  version: string;
-  variant: string;
-  /** Modelo de lenguaje principal (ver cacheModelKey). */
-  model: string;
-  /** Modelo con que se calculó el embedding de la pregunta. */
-  embeddingModel: string;
-}
-
-export interface SimilarQuestion {
-  cache_key: string;
-  question: string;
-  similarity: number;
-  variant: string | null;
-}
-
-/**
- * Respuestas que dicen que no hay información ("no aparece", "no encontré"…).
- * Suelen venir de una búsqueda que no trajo lo necesario o del modelo de
- * respaldo sin herramientas: guardarlas fijaría un "no" incorrecto.
- */
-const NEGATIVE_ANSWER =
-  /\b(no (se )?(encontr|aparec|hay (informaci|datos)|tengo (informaci|datos)|dispongo|cuento con|figura|incluye|contiene|menciona|se enumeran)|sin informaci|lo siento)/;
-
-export function isNegativeAnswer(answer: string): boolean {
-  // Solo la primera oración: una respuesta útil puede aclarar más adelante lo que no está.
-  const first = answer.trim().split(/(?<=[.!?])\s|\n/)[0].slice(0, 240);
-  const opening = AnswerCacheService.normalizeQuestion(first);
-  return NEGATIVE_ANSWER.test(opening);
-}
-
-/** Vocabulario del catálogo por proyecto y versión del contenido (dura poco en memoria). */
-const vocabularyCache = new Map<string, { at: number; words: Set<string> }>();
-const VOCABULARY_TTL_MS = 10 * 60_000;
+import { toPgVector } from './pg-vector';
 
 /** Sube si cambia el prompt, el formato de las fuentes o la lógica de búsqueda. */
 const CACHE_SCHEMA_VERSION = 'v1';
 
-/** Palabras con las que empieza una pregunta que continúa la anterior ("¿y en plano?"). */
-const FOLLOW_UP_START = /^(y|e|o|pero|entonces|tambien|ademas|igual|mismo|lo mismo|otra vez|de nuevo|mas|menos|ahora|y si|y que|y cual|y cuales|y cuantos|y cuantas|y el|y la|y los|y las|solo|sino|por que no)\b/;
-
-/** Referencias a algo dicho antes en la conversación. */
-const FOLLOW_UP_REFERENCE = /\b(es[ao]s?|est[ao]s?|aquell[ao]s?|ese|este|aquel|ell[ao]s?|anterior(es)?|mencionad[ao]s?|dich[ao]s?|previ[ao]s?|ultim[ao]s?|primer[ao]s?|segund[ao]s?|tercer[ao]s?|la otra|el otro|los otros|las otras|lo que dijiste|me dijiste|arriba|de la lista|de esa lista|cual de|cuales de|de ellas|de ellos)\b/;
-
 /**
- * Caché de respuestas por proyecto. Se usa en cualquier pregunta que se
- * entienda por sí sola, aunque la conversación ya tenga mensajes; se salta en
- * las preguntas de seguimiento ("¿y en plano?", "¿cuál de esas…?"), cuyo
- * significado depende de lo anterior. La clave incluye una "versión" del
- * contenido del proyecto: subir, reprocesar o borrar un documento, o cambiar
- * las descripciones web, invalida automáticamente lo cacheado.
+ * Adaptador del puerto AnswerCache sobre la tabla answer_cache. La clave
+ * incluye una "versión" del contenido del proyecto: subir, reprocesar o borrar
+ * un documento, o cambiar las descripciones web, invalida lo guardado.
  */
 @Injectable()
-export class AnswerCacheService {
-  private readonly logger = new Logger(AnswerCacheService.name);
+export class SupabaseAnswerCache implements AnswerCache {
+  private readonly logger = new Logger(SupabaseAnswerCache.name);
 
   constructor(
     private readonly supabase: SupabaseService,
@@ -112,72 +56,14 @@ export class AnswerCacheService {
     return (data ?? []) as SimilarQuestion[];
   }
 
-  /** Términos distintivos del catálogo del proyecto (para el control léxico). */
-  async vocabulary(db: SupabaseClient, projectId: string, version: string): Promise<Set<string>> {
-    const id = `${projectId}:${version}`;
-    const hit = vocabularyCache.get(id);
-    if (hit && Date.now() - hit.at < VOCABULARY_TTL_MS) return hit.words;
-    const { data, error } = await db.rpc('catalog_vocabulary', { p_project_id: projectId });
-    if (error) this.logger.warn(`Vocabulario del catálogo no disponible: ${error.message}`);
-    const words = buildVocabulary(((data ?? []) as unknown[]).map((w) => String(w)));
-    if (vocabularyCache.size > 200) vocabularyCache.clear();
-    vocabularyCache.set(id, { at: Date.now(), words });
-    return words;
-  }
-
-  /**
-   * ¿La pregunta depende de la conversación anterior? En la primera pregunta
-   * nunca; después, si empieza como continuación, hace referencia a algo dicho
-   * antes o es demasiado corta para entenderse sola.
-   */
-  static isFollowUp(question: string, hasHistory: boolean): boolean {
-    if (!hasHistory) return false;
-    const q = AnswerCacheService.normalizeQuestion(question);
-    if (q.split(' ').length <= 2) return true;
-    return FOLLOW_UP_START.test(q) || FOLLOW_UP_REFERENCE.test(q);
-  }
-
-  /** "¿Cuántas telas de ALGODÓN hay?" y "cuantas telas de algodon hay" comparten clave. */
-  static normalizeQuestion(question: string): string {
-    return question
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[¿?¡!.,;:"'()]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  /** Versión del contenido del proyecto (documentos y descripciones web), leída con el cliente del usuario (RLS). */
-  async contentVersion(db: SupabaseClient, projectId: string): Promise<string> {
-    const { data, error } = await db
-      .from('documents')
-      .select('updated_at')
-      .eq('project_id', projectId)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-    const { count } = await db
-      .from('documents')
-      .select('id', { count: 'exact', head: true })
-      .eq('project_id', projectId);
-    const { data: enriched } = await db
-      .from('catalog_enrichments')
-      .select('updated_at')
-      .eq('project_id', projectId)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-    if (error) throw new Error(error.message);
-    return `${count ?? 0}:${data?.[0]?.updated_at ?? 'none'}:${enriched?.[0]?.updated_at ?? 'none'}`;
-  }
-
   /**
    * @param variant identifica el canal (chat interno / widget).
    * @param model modelo de lenguaje principal (cacheModelKey): cambiarlo deja de usar lo guardado.
    */
-  key(projectId: string, version: string, question: string, variant = '', model = this.config.geminiModel): string {
+  key(projectId: string, version: string, question: string, variant: string, model: string): string {
     return createHash('sha256')
       .update(
-        [CACHE_SCHEMA_VERSION, projectId, version, model, variant, AnswerCacheService.normalizeQuestion(question)].join('|'),
+        [CACHE_SCHEMA_VERSION, projectId, version, model, variant, normalizeQuestion(question)].join('|'),
       )
       .digest('hex');
   }

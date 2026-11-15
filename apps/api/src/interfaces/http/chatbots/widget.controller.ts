@@ -18,7 +18,7 @@ import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, Lengt
 import type { Request, Response } from 'express';
 import { Public } from '../auth/auth.guard';
 import { ChatEngineService } from '../../../application/chat/chat-engine.service';
-import type { ChatTurn } from '../../../infrastructure/llm/gemini-chat-model';
+import type { ChatTurn } from '../../../domain/llm/llm';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ApiKeysService } from '../../../application/api-keys/api-keys.service';
 import { ChatbotsService, publicConfig, type ChatbotRow } from '../../../application/chatbots/chatbots.service';

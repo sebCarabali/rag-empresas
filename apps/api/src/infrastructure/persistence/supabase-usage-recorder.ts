@@ -1,42 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../../infrastructure/config/app-config';
+import { AppConfig } from '../../config/app-config';
 import type { LlmProvider } from '../../domain/models/catalog';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
-
-export type UsageChannel = 'app' | 'widget' | 'api' | 'eval' | 'warm' | 'ocr' | 'enrich';
-
-export interface TokenUsage {
-  input: number;
-  output: number;
-}
-
-export interface UsageEvent {
-  companyId: string;
-  projectId?: string | null;
-  channel: UsageChannel;
-  cacheMatch?: 'exact' | 'semantic' | null;
-  provider?: LlmProvider | null;
-  model?: string | null;
-  fallback?: boolean;
-  keyOwner?: 'company' | 'platform' | null;
-  usage?: TokenUsage | null;
-  durationMs?: number;
-}
-
-/** Lee los tokens de la metadata de uso de Gemini (el pensamiento se cobra como salida). */
-export function geminiUsage(meta: unknown): TokenUsage | null {
-  const m = meta as { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number } | undefined;
-  if (!m || m.promptTokenCount === undefined) return null;
-  return { input: m.promptTokenCount ?? 0, output: (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0) };
-}
+import type { TokenUsage } from '../../domain/llm/llm';
+import type { UsageEvent, UsageRecorder } from '../../application/ports';
+import { SupabaseService } from '../supabase/supabase.service';
 
 /**
- * Registro de uso para el panel (preguntas, caché, respaldo, tokens y gasto
- * estimado). Nunca bloquea ni hace fallar la respuesta.
+ * Adaptador del puerto UsageRecorder: registro de uso para el panel
+ * (preguntas, caché, respaldo, tokens y gasto estimado). Nunca bloquea ni hace
+ * fallar la respuesta.
  */
 @Injectable()
-export class UsageService {
-  private readonly logger = new Logger(UsageService.name);
+export class SupabaseUsageRecorder implements UsageRecorder {
+  private readonly logger = new Logger(SupabaseUsageRecorder.name);
 
   constructor(
     private readonly supabase: SupabaseService,

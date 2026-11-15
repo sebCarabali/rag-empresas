@@ -2,15 +2,19 @@ import 'reflect-metadata';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { ChatEngineService } from './chat-engine.service';
-import type { LlmEvent } from '../llm/llm.service';
+import type { LlmEvent } from '../../domain/llm/llm';
 
-/** Cliente de Supabase falso: cualquier consulta devuelve vacío. */
-function fakeDb() {
-  const empty = { data: [], count: 0, error: null };
-  const chain: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'order', 'limit', 'in']) chain[m] = () => chain;
-  chain.then = (resolve: (v: unknown) => void) => resolve(empty);
-  return { from: () => chain, rpc: async () => ({ data: [], error: null }) };
+/** Base de conocimiento falsa (puerto KnowledgeBase): sin documentos ni catálogo. */
+function fakeKnowledge(vocabulary: string[] = []) {
+  return {
+    forScope: () => ({
+      searchChunks: async () => [],
+      contentVersion: async () => 'v1',
+      catalogVocabulary: async () => new Set(vocabulary),
+      webDescriptions: async () => [],
+      catalogTools: async () => null,
+    }),
+  };
 }
 
 function engineWith(
@@ -27,13 +31,11 @@ function engineWith(
   const runs: Array<Record<string, unknown>> = [];
   const cache = {
     enabled: true,
-    contentVersion: async () => 'v1',
     key: () => 'clave',
     semanticEnabled: Boolean(options.similar),
     // La entrada exacta no existe cuando se prueba la caché por significado.
     get: async (key: string) => (options.similar ? (key === 'parecida' ? options.cached : null) : (options.cached ?? null)),
     similar: async () => options.similar ?? [],
-    vocabulary: async () => new Set(options.vocabulary ?? []),
     put: async (_k: string, _p: string, _q: string, value: Record<string, unknown>) => {
       puts.push(value);
     },
@@ -55,16 +57,17 @@ function engineWith(
     {
       get: async () => ({ llmProvider: 'gemini', llmModel: null, llmFallback: 'groq', llmFallbackModel: null, embeddingModel: null }),
       route: async () => ({
-        primary: { provider: 'gemini', model: 'gemini-test', apiKey: 'k', keyOwner: 'platform' },
+        primary: { provider: 'gemini', model: 'gemini-test', apiKey: 'k', keyOwner: 'company' },
         fallback: null,
       }),
     } as never,
+    fakeKnowledge(options.vocabulary) as never,
   );
   return { engine, puts, runs, recorded };
 }
 
 const input = () => ({
-  db: fakeDb() as never,
+  db: {} as never,
   projectId: 'p1',
   companyId: 'c1',
   question: '¿Qué telas de algodón hay?',

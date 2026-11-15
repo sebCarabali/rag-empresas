@@ -57,7 +57,14 @@ export class AppConfig {
 
   /** Modelo por defecto de OpenAI (la clave la pone cada asistente). */
   readonly openaiModel = optional('OPENAI_MODEL', 'gpt-5.4-mini');
-  /** Si Gemini no empieza a responder en este tiempo, se pasa a Groq. */
+  /** Modelo por defecto de Mistral (la clave la pone cada asistente). */
+  readonly mistralModel = optional('MISTRAL_MODEL', 'mistral-medium-latest');
+
+  /** Modelo por defecto de cada proveedor. */
+  get defaultModels(): Record<'gemini' | 'groq' | 'openai' | 'mistral', string> {
+    return { gemini: this.geminiModel, groq: this.groqModel, openai: this.openaiModel, mistral: this.mistralModel };
+  }
+  /** Si el modelo principal no empieza a responder en este tiempo, se pasa al respaldo. */
   readonly geminiFirstEventTimeoutMs = Number(optional('GEMINI_FIRST_EVENT_TIMEOUT_MS', '25000'));
 
   /**
@@ -141,6 +148,11 @@ export class AppConfig {
     openai: {
       input: Number(optional('OPENAI_PRICE_INPUT_PER_M', '0.75')),
       output: Number(optional('OPENAI_PRICE_OUTPUT_PER_M', '4.50')),
+    },
+    /** Por defecto, Mistral Medium. */
+    mistral: {
+      input: Number(optional('MISTRAL_PRICE_INPUT_PER_M', '1.50')),
+      output: Number(optional('MISTRAL_PRICE_OUTPUT_PER_M', '7.50')),
     },
   };
 }

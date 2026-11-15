@@ -8,12 +8,12 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'sb_secret_test';
 process.env.GEMINI_API_KEY ??= 'x';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { AppConfig } = require('../../infrastructure/config/app-config');
+const { AppConfig } = require('../../config/app-config');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { EnrichmentService } = require('./enrichment.service');
+const { GeminiWebResearcher } = require('./gemini-web-researcher');
 
 test('describe: usa Google Search, toma el texto y deduplica las fuentes', async () => {
-  const service = new EnrichmentService({ admin: {} }, new AppConfig(), { getKey: async () => 'k' }, { record: async () => undefined });
+  const service = new GeminiWebResearcher(new AppConfig());
   let request: Record<string, any> = {};
   service.client = () => ({
     models: {

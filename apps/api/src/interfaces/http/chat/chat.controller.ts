@@ -14,13 +14,13 @@ import { IsOptional, IsString, Length, MaxLength } from 'class-validator';
 import type { Response } from 'express';
 import { CurrentUser, type AuthUser } from '../auth/auth-user';
 import { unwrap } from '../supabase-error';
-import { MissingModelKeyError } from '../../../infrastructure/secrets/vault-provider-key-store';
+import { MissingModelKeyError } from '../../../domain/llm/llm';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ChatbotsService } from '../../../application/chatbots/chatbots.service';
 import { ChatEngineService, type CacheMatch } from '../../../application/chat/chat-engine.service';
 import type { CatalogToolCall } from '../../../infrastructure/persistence/catalog-tools';
-import { type ChatTurn } from '../../../infrastructure/llm/gemini-chat-model';
-import type { ModelInfo } from '../../../application/llm/llm.service';
+import type { ChatTurn } from '../../../domain/llm/llm';
+import type { ModelInfo } from '../../../domain/llm/llm';
 import type { Source } from '../../../domain/chat/prompt';
 
 class CreateConversationDto {

@@ -1,14 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../../infrastructure/config/app-config';
-import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { AppConfig } from '../../config/app-config';
+import { toPgVector } from '../../infrastructure/persistence/pg-vector';
+import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { ModelSettingsService } from '../models/model-settings.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { chunkSections, type Chunk } from '../../domain/ingestion/chunker';
 import { csvToCatalogItems, csvToChunks, type CatalogItem } from '../../domain/ingestion/csv-catalog';
-import { OcrService } from '../../infrastructure/ocr/gemini-ocr.service';
-import { spreadsheetToTable, XLSX_MIME } from '../../infrastructure/extraction/spreadsheet';
-import { extractText, TABULAR_MIME_TYPES, UnsupportedFileError, type TextSection } from '../../infrastructure/extraction/text-extractor';
-import { ProjectKeysService } from '../../infrastructure/secrets/vault-provider-key-store';
+import { TABULAR_MIME_TYPES, UnsupportedFileError, XLSX_MIME, type TextSection } from '../../domain/ingestion/documents';
+import {
+  DOCUMENT_READER,
+  PROVIDER_KEY_READER,
+  TEXT_RECOGNIZER,
+  type DocumentReader,
+  type ProviderKeyReader,
+  type TextRecognizer,
+} from '../ports';
 
 export interface IngestionJob {
   documentId: string;
@@ -45,8 +51,9 @@ export class IngestionService {
     private readonly embeddings: EmbeddingsService,
     private readonly models: ModelSettingsService,
     private readonly config: AppConfig,
-    private readonly ocr: OcrService,
-    private readonly keys: ProjectKeysService,
+    @Inject(TEXT_RECOGNIZER) private readonly ocr: TextRecognizer,
+    @Inject(DOCUMENT_READER) private readonly reader: DocumentReader,
+    @Inject(PROVIDER_KEY_READER) private readonly keys: ProviderKeyReader,
   ) {}
 
   /**
@@ -100,11 +107,11 @@ export class IngestionService {
         chunks = csvToChunks(buffer);
         catalogItems = csvToCatalogItems(buffer);
       } else if (doc.mime_type === XLSX_MIME) {
-        ({ chunks, items: catalogItems } = await spreadsheetToTable(buffer));
+        ({ chunks, items: catalogItems } = await this.reader.readSpreadsheet(buffer));
       } else {
         // OCR con la clave de Gemini de la empresa (PDF escaneados e imágenes).
         const ocr = (b: Buffer, mime: string) => this.cachedOcr(doc, b, mime);
-        chunks = chunkSections(await extractText(buffer, doc.mime_type, ocr));
+        chunks = chunkSections(await this.reader.extractText(buffer, doc.mime_type, ocr));
       }
     } catch (err) {
       if (err instanceof UnsupportedFileError) throw new PermanentIngestionError(err.message);

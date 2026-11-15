@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { geminiClient } from '../llm/gemini-chat-model';
-import { AppConfig } from '../config/app-config';
-import { geminiUsage, UsageService } from '../../application/usage/usage.service';
-import type { TextSection } from '../extraction/text-extractor';
+import { AppConfig } from '../../config/app-config';
+import { USAGE_RECORDER, type TextRecognizer, type UsageRecorder } from '../../application/ports';
+import { geminiUsage } from '../llm/gemini-usage';
+import type { TextSection } from '../../domain/ingestion/documents';
 
 /** Por encima de este tamaño el archivo se sube con la Files API en vez de ir dentro de la petición. */
 const INLINE_LIMIT_BYTES = 15 * 1024 * 1024;
@@ -31,12 +32,12 @@ export function splitOcrPages(text: string): TextSection[] {
  * Usa la clave de Gemini del asistente del proyecto.
  */
 @Injectable()
-export class OcrService {
-  private readonly logger = new Logger(OcrService.name);
+export class GeminiOcrService implements TextRecognizer {
+  private readonly logger = new Logger(GeminiOcrService.name);
 
   constructor(
     private readonly config: AppConfig,
-    private readonly usage: UsageService,
+    @Inject(USAGE_RECORDER) private readonly usage: UsageRecorder,
   ) {}
 
   async transcribe(
