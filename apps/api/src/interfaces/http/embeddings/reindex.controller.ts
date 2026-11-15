@@ -1,24 +1,24 @@
-import { ConflictException, Controller, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { CurrentUser, type AuthUser } from '../auth/auth-user';
-import { unwrap } from '../supabase-error';
+import { ConflictException, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { CurrentUser, scopeOf, type AuthUser } from '../auth/auth-user';
 import { AppConfig } from '../../../config/app-config';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ReindexService } from '../../../application/embeddings/reindex.service';
+import { ProjectAccessService } from '../../../application/access/project-access.service';
+import { ADMIN_ROLES, PROJECT_REPOSITORY, type ProjectRepository } from '../../../application/ports';
 
 /** Estado del índice de búsqueda del proyecto y reindexado manual. */
 @Controller('projects/:projectId/reindex')
 export class ReindexController {
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
+    private readonly access: ProjectAccessService,
     private readonly reindex: ReindexService,
     private readonly config: AppConfig,
   ) {}
 
-  /** Cualquier miembro (RLS); si el índice está desactualizado, arranca el reindexado. */
+  /** Cualquier miembro; si el índice está desactualizado, arranca el reindexado. */
   @Get()
   async status(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    unwrap(await db.from('projects').select('id').eq('id', projectId).single(), 'Proyecto no encontrado');
+    await this.projects.ref(scopeOf(user), projectId);
     await this.reindex.ensureCurrent(projectId);
     const status = await this.reindex.status(projectId);
     return { ...status, reranker: this.config.reranker.enabled ? this.config.reranker.model : null };
@@ -28,13 +28,7 @@ export class ReindexController {
   @Post()
   @HttpCode(202)
   async start(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    const project = unwrap(
-      await db.from('projects').select('id, company_id').eq('id', projectId).single(),
-      'Proyecto no encontrado',
-    );
-    const { data: allowed } = await db.rpc('has_company_role', { p_company_id: project.company_id, p_roles: ['owner', 'admin'] });
-    if (!allowed) throw new ForbiddenException('No tienes permiso para esta acción');
+    await this.access.require(scopeOf(user), projectId, ADMIN_ROLES);
     if (!(await this.reindex.start(projectId))) throw new ConflictException('Ya se está reindexando este proyecto');
     return this.reindex.status(projectId);
   }

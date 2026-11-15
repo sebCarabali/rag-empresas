@@ -13,21 +13,24 @@ import {
   Put,
 } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, Length, Matches } from 'class-validator';
-import { CurrentUser, type AuthUser } from '../auth/auth-user';
+import { CurrentUser, scopeOf, type AuthUser } from '../auth/auth-user';
 import { LlmService } from '../../../application/llm/llm.service';
 import { describeFailure, type LlmEvent, type LlmTarget } from '../../../domain/llm/llm';
 import {
-  PROVIDER_KEY_READER,
+  ADMIN_ROLES,
+  MODEL_SETTINGS_REPOSITORY,
   PROVIDER_KEY_VALIDATOR,
-  type ProviderKeyReader,
+  PROVIDER_KEY_WRITER,
+  type DataScope,
+  type ModelSettingsRepository,
+  type ProjectRef,
   type ProviderKeyValidator,
+  type ProviderKeyWriter,
 } from '../../../application/ports';
-import { DEFAULT_CHATBOT } from '../../../application/chatbots/chatbots.service';
-import { unwrap } from '../supabase-error';
+import { ProjectAccessService } from '../../../application/access/project-access.service';
 import { AppConfig } from '../../../config/app-config';
 import { EmbeddingsService } from '../../../application/embeddings/embeddings.service';
 import { ReindexService } from '../../../application/embeddings/reindex.service';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import {
   EMBEDDING_MODELS,
   LLM_PROVIDERS,
@@ -38,7 +41,6 @@ import {
   type LlmProvider,
 } from '../../../domain/models/catalog';
 import { ModelSettingsService } from '../../../application/models/model-settings.service';
-import { MODEL_COLUMNS, toSettings } from '../../../infrastructure/persistence/supabase-model-settings.repository';
 
 class ModelSettingsDto {
   @IsIn(LLM_PROVIDERS)
@@ -90,38 +92,32 @@ class ProviderKeyDto {
 @Controller()
 export class ModelsController {
   constructor(
-    private readonly supabase: SupabaseService,
     private readonly models: ModelSettingsService,
-    @Inject(PROVIDER_KEY_READER) private readonly keys: ProviderKeyReader,
+    @Inject(MODEL_SETTINGS_REPOSITORY) private readonly settings: ModelSettingsRepository,
+    @Inject(PROVIDER_KEY_WRITER) private readonly keys: ProviderKeyWriter,
     @Inject(PROVIDER_KEY_VALIDATOR) private readonly validator: ProviderKeyValidator,
     private readonly llm: LlmService,
     private readonly embeddings: EmbeddingsService,
     private readonly reindex: ReindexService,
     private readonly config: AppConfig,
+    private readonly access: ProjectAccessService,
   ) {}
 
-  private async project(user: AuthUser, projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    const project = unwrap(
-      await db.from('projects').select('id, company_id').eq('id', projectId).single(),
-      'Proyecto no encontrado',
-    );
-    const canEdit = Boolean(
-      unwrap(await db.rpc('has_company_role', { p_company_id: project.company_id, p_roles: ['owner', 'admin'] })),
-    );
-    return { db, project, canEdit };
+  private async project(user: AuthUser, projectId: string): Promise<{ scope: DataScope; project: ProjectRef; canEdit: boolean }> {
+    const scope = scopeOf(user);
+    const { project, allowed } = await this.access.check(scope, projectId, ADMIN_ROLES);
+    return { scope, project, canEdit: allowed };
   }
 
   /** Configuración actual, opciones disponibles y qué claves hay. */
   @Get('projects/:projectId/models')
   async get(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const { db, project, canEdit } = await this.project(user, projectId);
-    const { data } = await db.from('chatbots').select(MODEL_COLUMNS).eq('project_id', projectId).maybeSingle();
+    const { project, canEdit } = await this.project(user, projectId);
     const keys = await this.models.availability(projectId);
     return {
       canEdit,
-      companyId: project.company_id,
-      settings: toSettings(data),
+      companyId: project.companyId,
+      settings: await this.settings.find(projectId),
       defaults: {
         llm: Object.fromEntries(LLM_PROVIDERS.map((p) => [p, this.models.defaultModel(p)])),
         embeddingModel: this.config.embeddingModel,
@@ -146,7 +142,7 @@ export class ModelsController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() dto: ModelSettingsDto,
   ) {
-    const { db, project, canEdit } = await this.project(user, projectId);
+    const { scope, project, canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar los modelos');
 
     const keys = await this.models.availability(projectId);
@@ -162,23 +158,14 @@ export class ModelsController {
       throw new BadRequestException(`El modelo ${emb.label} necesita la clave de ${PROVIDER_LABEL[emb.provider]} de este asistente.`);
     }
 
-    const values = {
-      llm_provider: dto.llmProvider,
-      llm_model: dto.llmModel?.trim() || null,
-      llm_fallback: dto.llmFallback,
-      llm_fallback_model: dto.llmFallback === 'none' ? null : dto.llmFallbackModel?.trim() || null,
+    await this.settings.save(scope, project, {
+      llmProvider: dto.llmProvider,
+      llmModel: dto.llmModel?.trim() || null,
+      llmFallback: dto.llmFallback,
+      llmFallbackModel: dto.llmFallback === 'none' ? null : dto.llmFallbackModel?.trim() || null,
       // El modelo por defecto de la plataforma se guarda como null (sigue los cambios de la plataforma).
-      embedding_model: dto.embeddingModel && dto.embeddingModel !== this.config.embeddingModel ? dto.embeddingModel : null,
-    };
-    const { data: existing } = await db.from('chatbots').select('id').eq('project_id', projectId).maybeSingle();
-    const result = existing
-      ? await db.from('chatbots').update(values).eq('id', existing.id).select(MODEL_COLUMNS).single()
-      : await db
-          .from('chatbots')
-          .insert({ ...DEFAULT_CHATBOT, ...values, project_id: projectId, company_id: project.company_id })
-          .select(MODEL_COLUMNS)
-          .single();
-    unwrap(result, 'Solo owner o admin pueden cambiar los modelos');
+      embeddingModel: dto.embeddingModel && dto.embeddingModel !== this.config.embeddingModel ? dto.embeddingModel : null,
+    });
     this.models.invalidate(projectId);
 
     // Nuevo modelo de embeddings: se recalculan los del proyecto en segundo plano.
@@ -248,15 +235,10 @@ export class ModelsController {
     @Body() dto: ProviderKeyDto,
   ) {
     const p = this.provider(provider);
-    const { db, canEdit } = await this.project(user, projectId);
+    const { scope, canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar las claves');
     await this.validator.validate(p, dto.apiKey.trim());
-    unwrap(
-      await db
-        .rpc('set_project_provider_key', { p_project_id: projectId, p_provider: p, p_key: dto.apiKey.trim() })
-        .then((r) => ({ ...r, data: true })),
-    );
-    this.keys.invalidate(projectId);
+    await this.keys.save(scope, projectId, p, dto.apiKey.trim());
   }
 
   /** Elimina la clave de un proveedor del asistente. */
@@ -268,16 +250,13 @@ export class ModelsController {
     @Param('provider') provider: string,
   ) {
     const p = this.provider(provider);
-    const { db, canEdit } = await this.project(user, projectId);
+    const { scope, canEdit } = await this.project(user, projectId);
     if (!canEdit) throw new ForbiddenException('Solo owner o admin pueden cambiar las claves');
     const settings = await this.models.get(projectId);
     if (settings.llmProvider === p) {
       throw new BadRequestException(`${PROVIDER_LABEL[p]} es el modelo principal de este asistente: elige otro proveedor antes de borrar su clave.`);
     }
-    unwrap(
-      await db.rpc('delete_project_provider_key', { p_project_id: projectId, p_provider: p }).then((r) => ({ ...r, data: true })),
-    );
-    this.keys.invalidate(projectId);
+    await this.keys.remove(scope, projectId, p);
   }
 
   private provider(value: string): LlmProvider {

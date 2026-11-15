@@ -67,7 +67,7 @@ function engineWith(
 }
 
 const input = () => ({
-  db: {} as never,
+  scope: { kind: 'system' } as const,
   projectId: 'p1',
   companyId: 'c1',
   question: '¿Qué telas de algodón hay?',

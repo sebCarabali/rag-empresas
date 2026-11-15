@@ -6,6 +6,7 @@ import type { CatalogTools, DataScope, KnowledgeBase, KnowledgeBaseFactory, WebD
 import { createCatalogExecutor, loadCatalogContext } from './catalog-tools';
 import { loadEnrichments } from './enrichment-context';
 import { toPgVector } from './pg-vector';
+import { SupabaseService } from '../supabase/supabase.service';
 
 /** Vocabulario del catálogo por proyecto y versión del contenido (dura poco en memoria). */
 const vocabularyCache = new Map<string, { at: number; words: Set<string> }>();
@@ -14,7 +15,7 @@ const VOCABULARY_TTL_MS = 10 * 60_000;
 /**
  * Adaptador del puerto KnowledgeBase sobre Supabase. Se crea por ámbito: con
  * el cliente del usuario (JWT, aplica RLS) en la app, o con service_role en el
- * widget y la API pública (que ya validaron el acceso al proyecto).
+ * widget, la API pública y el worker (que ya validaron el acceso al proyecto).
  */
 export class SupabaseKnowledgeBase implements KnowledgeBase {
   private readonly logger = new Logger(SupabaseKnowledgeBase.name);
@@ -85,10 +86,12 @@ export class SupabaseKnowledgeBase implements KnowledgeBase {
   }
 }
 
-/** Fábrica (Abstract Factory): el ámbito es un cliente de Supabase. */
+/** Fábrica (Abstract Factory): una base de conocimiento por ámbito de datos. */
 @Injectable()
 export class SupabaseKnowledgeBaseFactory implements KnowledgeBaseFactory {
+  constructor(private readonly supabase: SupabaseService) {}
+
   forScope(scope: DataScope): KnowledgeBase {
-    return new SupabaseKnowledgeBase(scope as SupabaseClient);
+    return new SupabaseKnowledgeBase(this.supabase.client(scope));
   }
 }

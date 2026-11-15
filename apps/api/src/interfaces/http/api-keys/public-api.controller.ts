@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Inject,
   Logger,
   Post,
   Res,
@@ -17,7 +18,7 @@ import { Public } from '../auth/auth.guard';
 import { ChatEngineService } from '../../../application/chat/chat-engine.service';
 import type { ChatTurn } from '../../../domain/llm/llm';
 import { ChatbotsService } from '../../../application/chatbots/chatbots.service';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { CHATBOT_REPOSITORY, SYSTEM_SCOPE, type ChatbotRepository } from '../../../application/ports';
 import { ApiKeysService, TOKEN_MAX_TTL, type ApiKeyContext } from '../../../application/api-keys/api-keys.service';
 
 class Turn {
@@ -73,7 +74,7 @@ export class PublicApiController {
 
   constructor(
     private readonly keys: ApiKeysService,
-    private readonly supabase: SupabaseService,
+    @Inject(CHATBOT_REPOSITORY) private readonly bots: ChatbotRepository,
     private readonly engine: ChatEngineService,
     private readonly chatbots: ChatbotsService,
   ) {}
@@ -93,9 +94,8 @@ export class PublicApiController {
     const ctx = await this.keys.authenticate(auth);
     await this.enforceDailyLimit(ctx);
 
-    const db = this.supabase.admin;
     const input = {
-      db,
+      scope: SYSTEM_SCOPE,
       projectId: ctx.projectId,
       companyId: ctx.companyId,
       question: dto.question.trim(),
@@ -140,9 +140,7 @@ export class PublicApiController {
 
   private async enforceDailyLimit(ctx: ApiKeyContext) {
     if (!ctx.chatbot) return;
-    const { data: used, error } = await this.supabase.admin.rpc('widget_register_message', { p_chatbot_id: ctx.chatbot.id });
-    if (error) throw new Error(error.message);
-    if (Number(used) > ctx.chatbot.daily_message_limit) {
+    if ((await this.bots.registerWidgetMessage(ctx.chatbot.id)) > ctx.chatbot.daily_message_limit) {
       throw new HttpException('Se alcanzó el límite diario de mensajes del asistente', HttpStatus.TOO_MANY_REQUESTS);
     }
   }

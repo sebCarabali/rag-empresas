@@ -3,7 +3,8 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { buildSystemInstruction } from '../../domain/chat/prompt';
 import { normalizeOrigin } from '../../interfaces/http/chatbots/chatbots.controller';
-import { ChatbotsService, publicConfig } from './chatbots.service';
+import { ChatbotsService } from './chatbots.service';
+import { publicConfig } from '../../domain/chatbots/chatbot';
 
 test('normalizeOrigin: deja solo el origen y agrega https', () => {
   assert.equal(normalizeOrigin('empresa.com/tienda?x=1'), 'https://empresa.com');
@@ -32,7 +33,7 @@ test('sin personalización el prompt es el de base', () => {
 });
 
 test('profile: valores por defecto para el widget si no hay configuración', () => {
-  const svc = new ChatbotsService();
+  const svc = new ChatbotsService({} as never);
   assert.equal(svc.profile(null, 'internal'), null);
   assert.deepEqual(svc.profile(null, 'public'), { ...svc.profile(null, 'public')!, name: 'Asistente', audience: 'public' });
 });

@@ -2,6 +2,15 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); versiones con [SemVer](https://semver.org/lang/es/).
 
+## [0.23.0] - 2026-11-15
+
+### Cambiado
+
+- Capa de acceso a datos de la API: repositorios por agregado (proyectos, documentos, fragmentos, catálogo, asistentes, conversaciones, valoraciones, mensajes del widget, pruebas, descripciones web, precalentamiento, claves de API), almacenamiento de archivos y verificación de sesión detrás de puertos. Ningún caso de uso ni controlador usa Supabase directamente.
+- Nuevos casos de uso `DocumentsService` (subir, procesar, borrar), `ProjectsService` (borrar con sus archivos) y `ProjectAccessService` (proyecto visible y rol del usuario).
+- Errores de la aplicación (`NotFoundError`, `ForbiddenError`, `ConflictError`, `InvalidInputError`) traducidos a HTTP por un filtro global. Guardar el asistente, sus modelos o su clave pública sin permiso responde 403 (antes 404).
+- La API reutiliza el cliente de base de datos de cada sesión entre consultas de la misma petición.
+
 ## [0.22.0] - 2026-11-15
 
 ### Agregado

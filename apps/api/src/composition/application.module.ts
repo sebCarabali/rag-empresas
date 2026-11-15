@@ -1,5 +1,8 @@
 import { Module, type Provider } from '@nestjs/common';
+import { ProjectAccessService } from '../application/access/project-access.service';
 import { ApiKeysService } from '../application/api-keys/api-keys.service';
+import { DocumentsService } from '../application/documents/documents.service';
+import { ProjectsService } from '../application/projects/projects.service';
 import { CacheWarmService } from '../application/cache/cache-warm.service';
 import { ChatEngineService } from '../application/chat/chat-engine.service';
 import { ChatbotsService } from '../application/chatbots/chatbots.service';
@@ -18,7 +21,6 @@ import {
   EMBEDDING_BACKENDS,
   JOB_QUEUE,
   KNOWLEDGE_BASE_FACTORY,
-  MODEL_SETTINGS_REPOSITORY,
   RERANKER,
   TEXT_RECOGNIZER,
   WEB_RESEARCHER,
@@ -34,7 +36,6 @@ import { GROQ_DIALECT, MISTRAL_DIALECT, OPENAI_DIALECT } from '../infrastructure
 import { GeminiOcrService } from '../infrastructure/ocr/gemini-ocr.service';
 import { SupabaseAnswerCache } from '../infrastructure/persistence/supabase-answer-cache';
 import { SupabaseKnowledgeBaseFactory } from '../infrastructure/persistence/supabase-knowledge-base';
-import { SupabaseModelSettingsRepository } from '../infrastructure/persistence/supabase-model-settings.repository';
 import { IngestionQueueService } from '../infrastructure/queue/ingestion-queue.service';
 import { TransformersReranker } from '../infrastructure/rerank/transformers-reranker';
 
@@ -70,7 +71,6 @@ const ADAPTERS: Provider[] = [
   { provide: RERANKER, useClass: TransformersReranker },
   { provide: ANSWER_CACHE, useClass: SupabaseAnswerCache },
   { provide: KNOWLEDGE_BASE_FACTORY, useClass: SupabaseKnowledgeBaseFactory },
-  { provide: MODEL_SETTINGS_REPOSITORY, useClass: SupabaseModelSettingsRepository },
   { provide: TEXT_RECOGNIZER, useClass: GeminiOcrService },
   { provide: DOCUMENT_READER, useClass: FileDocumentReader },
   { provide: WEB_RESEARCHER, useClass: GeminiWebResearcher },
@@ -80,6 +80,9 @@ const ADAPTERS: Provider[] = [
 
 /** Casos de uso y servicios de aplicación. */
 const USE_CASES: Provider[] = [
+  ProjectAccessService,
+  ProjectsService,
+  DocumentsService,
   ChatModelRegistry,
   LlmService,
   EmbeddingsService,
@@ -94,7 +97,7 @@ const USE_CASES: Provider[] = [
   ApiKeysService,
 ];
 
-const EXPORTED = [...USE_CASES, IngestionQueueService, JOB_QUEUE, RERANKER, ANSWER_CACHE, MODEL_SETTINGS_REPOSITORY];
+const EXPORTED = [...USE_CASES, IngestionQueueService, JOB_QUEUE, RERANKER, ANSWER_CACHE];
 
 /**
  * Raíz de composición de la aplicación (la usan la API HTTP y el worker de la

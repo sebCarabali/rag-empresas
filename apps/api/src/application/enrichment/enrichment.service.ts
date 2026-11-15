@@ -1,14 +1,19 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  CATALOG_REPOSITORY,
+  ENRICHMENT_REPOSITORY,
+  PROJECT_REPOSITORY,
   PROVIDER_KEY_READER,
   USAGE_RECORDER,
   WEB_RESEARCHER,
+  type CatalogRepository,
+  type EnrichmentRepository,
+  type ProjectRepository,
   type ProviderKeyReader,
   type UsageRecorder,
   type WebResearcher,
 } from '../ports';
 import { AppConfig } from '../../config/app-config';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 
 /** Trabajo de la cola: generar descripciones web para un proyecto. */
 export interface EnrichJob {
@@ -16,13 +21,6 @@ export interface EnrichJob {
   projectId: string;
   /** Regenera también las descripciones existentes. */
   force?: boolean;
-}
-
-interface DistinctValue {
-  campo: string;
-  valor: string;
-  productos: number;
-  contexto: { composiciones?: string[]; tipos_de_tejido?: string[] };
 }
 
 /** Margen bajo el límite de la función para encolar el resto. */
@@ -37,7 +35,9 @@ const TIME_BUDGET_MS = 200_000;
 export class EnrichmentService {
   private readonly logger = new Logger(EnrichmentService.name);
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
+    @Inject(CATALOG_REPOSITORY) private readonly catalog: CatalogRepository,
+    @Inject(ENRICHMENT_REPOSITORY) private readonly enrichments: EnrichmentRepository,
     private readonly config: AppConfig,
     @Inject(PROVIDER_KEY_READER) private readonly keys: ProviderKeyReader,
     @Inject(USAGE_RECORDER) private readonly usage: UsageRecorder,
@@ -48,34 +48,16 @@ export class EnrichmentService {
   async run(job: EnrichJob): Promise<{ next?: EnrichJob }> {
     if (!this.config.webEnrichment || this.config.enrichFields.length === 0) return {};
     const started = Date.now();
-    const db = this.supabase.admin;
-
-    const { data: project } = await db.from('projects').select('id, company_id').eq('id', job.projectId).maybeSingle();
+    const project = await this.projects.findRef(job.projectId);
     if (!project) return {};
 
-    const { data: values, error } = await db.rpc('catalog_distinct_values', {
-      p_project_id: project.id,
-      p_fields: this.config.enrichFields,
-    });
-    if (error) throw new Error(`catalog_distinct_values: ${error.message}`);
-    const list = (values ?? []) as DistinctValue[];
+    const list = await this.catalog.distinctValues(project.id, this.config.enrichFields);
     if (list.length === 0) return {};
 
-    if (job.force) {
-      await db.from('catalog_enrichments').update({ status: 'pending', error: null }).eq('project_id', project.id);
-    }
+    if (job.force) await this.enrichments.resetAll(project.id);
     // Registra como pendientes los valores nuevos (los existentes se conservan).
-    const { error: insError } = await db.from('catalog_enrichments').upsert(
-      list.map((v) => ({ company_id: project.company_id, project_id: project.id, field: v.campo, value: v.valor })),
-      { onConflict: 'project_id,field,value', ignoreDuplicates: true },
-    );
-    if (insError) throw new Error(`catalog_enrichments: ${insError.message}`);
-
-    const { data: pending } = await db
-      .from('catalog_enrichments')
-      .select('id, field, value')
-      .eq('project_id', project.id)
-      .eq('status', 'pending');
+    await this.enrichments.registerValues(project, list.map((v) => ({ field: v.campo, value: v.valor })));
+    const pending = await this.enrichments.pending(project.id);
 
     // Las búsquedas se hacen con la clave de Gemini del asistente; sin ella se omiten.
     const geminiKey = await this.keys.getKey(project.id, 'gemini');
@@ -85,7 +67,7 @@ export class EnrichmentService {
     }
     const byKey = new Map(list.map((v) => [`${v.campo}\u0000${v.valor}`, v]));
     let done = 0;
-    for (const row of pending ?? []) {
+    for (const row of pending) {
       if (done > 0 && Date.now() - started > TIME_BUDGET_MS) {
         this.logger.log(`Proyecto ${project.id}: quedan descripciones; continúa en otro trabajo`);
         return { next: { kind: 'enrich', projectId: project.id } };
@@ -95,7 +77,7 @@ export class EnrichmentService {
         const callStarted = Date.now();
         const result = await this.researcher.describe(row.field, row.value, info?.contexto ?? {}, geminiKey);
         void this.usage.record({
-          companyId: project.company_id,
+          companyId: project.companyId,
           projectId: project.id,
           channel: 'enrich',
           provider: 'gemini',
@@ -104,28 +86,19 @@ export class EnrichmentService {
           usage: result.usage,
           durationMs: Date.now() - callStarted,
         });
-        await db
-          .from('catalog_enrichments')
-          .update({
-            status: 'ready',
-            description: result.description,
-            sources: result.sources,
-            search_queries: result.queries,
-            model: this.config.geminiModel,
-            error: null,
-          })
-          .eq('id', row.id);
+        await this.enrichments.markReady(row.id, {
+          description: result.description,
+          sources: result.sources,
+          queries: result.queries,
+          model: this.config.geminiModel,
+        });
       } catch (err) {
         const message = friendlyError(err);
         this.logger.warn(`Descripción de ${row.field}=${row.value} falló: ${message}`);
-        await db.from('catalog_enrichments').update({ status: 'failed', error: message }).eq('id', row.id);
+        await this.enrichments.markFailed(row.id, message);
         // Sin facturación o con la cuota agotada fallarán todas: no seguir gastando intentos.
         if (/facturaci|cuota/i.test(message)) {
-          await db
-            .from('catalog_enrichments')
-            .update({ status: 'failed', error: message })
-            .eq('project_id', project.id)
-            .eq('status', 'pending');
+          await this.enrichments.failPending(project.id, message);
           return {};
         }
       }
