@@ -73,9 +73,9 @@ export interface ToolCall {
 }
 
 /** Modelo que generó la respuesta; fallback = se usó el respaldo (Groq). */
-export type LlmProvider = 'gemini' | 'groq' | 'openai';
+export type LlmProvider = 'gemini' | 'groq' | 'openai' | 'mistral';
 
-export const PROVIDER_LABEL: Record<LlmProvider, string> = { gemini: 'Gemini', groq: 'Groq', openai: 'OpenAI' };
+export const PROVIDER_LABEL: Record<LlmProvider, string> = { gemini: 'Gemini', groq: 'Groq', openai: 'OpenAI', mistral: 'Mistral' };
 
 /** "Gemini · gemini-3.5-flash" */
 export function modelLabel(m: Pick<ModelInfo, 'provider' | 'model'>): string {
@@ -104,7 +104,7 @@ export interface ProviderOption {
 export interface EmbeddingOption {
   id: string;
   label: string;
-  provider: 'local' | 'gemini' | 'openai';
+  provider: 'local' | 'gemini' | 'openai' | 'mistral';
   dimensions: number;
   note: string;
   pricePerM: number;
@@ -183,7 +183,7 @@ export interface UsageReport {
   days: number;
   daily: UsageDay[];
   cachedAnswers: number;
-  prices: Record<'gemini' | 'groq', { input: number; output: number }> & { openai?: { input: number; output: number } };
+  prices: Record<'gemini' | 'groq', { input: number; output: number }> & Partial<Record<'openai' | 'mistral', { input: number; output: number }>>;
   models: { gemini: string; groq: string };
   semanticThreshold: number;
   autoWarm: boolean;

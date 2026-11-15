@@ -69,7 +69,7 @@ Cada proyecto tiene su asistente (`chatbots`), configurable en **Proyecto → As
 
 ### Claves de API por asistente
 
-La plataforma **no aporta claves de modelos**: cada asistente (proyecto) usa solo las que la empresa guarda en **Asistente y widget → Modelos** (owner/admin), para Gemini, OpenAI y Groq. El consumo se cobra a la cuenta de la empresa en cada proveedor.
+La plataforma **no aporta claves de modelos**: cada asistente (proyecto) usa solo las que la empresa guarda en **Asistente y widget → Modelos** (owner/admin), para Gemini, OpenAI, Groq y Mistral. El consumo se cobra a la cuenta de la empresa en cada proveedor.
 
 - La API comprueba la clave con el proveedor antes de guardarla.
 - Se guarda **cifrada en Supabase Vault** mediante `set_project_provider_key`. `chatbot_secrets` solo guarda la referencia y los últimos 4 caracteres; al borrar el proyecto se borran sus secretos del Vault.
@@ -122,10 +122,14 @@ Página **Calidad** de cada proyecto (`/projects/:id/quality`):
 
 ```
 apps/
-  api/                 NestJS (proyecto Vercel "api")
+  api/                 NestJS (proyecto Vercel "api"), arquitectura hexagonal: docs/arquitectura-api.md
     api/index.js       función HTTP
     api/queues/        función consumidora de la cola
-    src/               código Nest (se compila a dist/)
+    src/domain/        reglas y tipos puros
+    src/application/   casos de uso y puertos (ports/)
+    src/infrastructure/ adaptadores (Supabase, Vault, Gemini, OpenAI/Groq/Mistral, Transformers.js, colas)
+    src/interfaces/    controladores HTTP
+    src/composition/   módulos que enlazan puertos y adaptadores
   web/                 Next.js (proyecto Vercel "web")
   widget-demo/         sitio estático de prueba del widget (proyecto Vercel aparte)
 supabase/migrations/   esquema, RLS, storage y búsqueda híbrida
@@ -167,7 +171,7 @@ En local `INGEST_INLINE=true`: los documentos se procesan en el mismo proceso de
 | Proyecto | Root Directory | Framework | Variables |
 |---|---|---|---|
 | `rag-empresas-web` | `apps/web` | Next.js | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL` |
-| `rag-empresas-api` | `apps/api` | Other (lo fija `vercel.json`) | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `WEB_ORIGIN`; opcionales: `GEMINI_MODEL`, `GROQ_MODEL`, `OPENAI_MODEL` (modelos por defecto). Las claves de los modelos no van en variables de entorno: las guarda cada asistente |
+| `rag-empresas-api` | `apps/api` | Other (lo fija `vercel.json`) | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `WEB_ORIGIN`; opcionales: `GEMINI_MODEL`, `GROQ_MODEL`, `OPENAI_MODEL`, `MISTRAL_MODEL` (modelos por defecto). Las claves de los modelos no van en variables de entorno: las guarda cada asistente |
 
 - `WEB_ORIGIN` lleva la URL del frontend (o varias separadas por coma) para CORS.
 - Rama de producción: `main`. Los pushes a `develop` y a cada PR generan *previews*.
@@ -223,11 +227,11 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 En «Asistente y widget → Modelos» (owner/admin) cada proyecto elige:
 
-- **Modelo de lenguaje:** Gemini, Groq u OpenAI, con el modelo de una lista sugerida o escrito a mano, y un botón «Probar conexión».
+- **Modelo de lenguaje:** Gemini, Groq, OpenAI o Mistral, con el modelo de una lista sugerida o escrito a mano, y un botón «Probar conexión».
 - **Respaldo:** otro proveedor (o ninguno) que responde solo si el principal falla o no empieza a tiempo; sus respuestas quedan provisionales en la caché.
-- **Embeddings:** Multilingual E5 base (local, gratis, 768), Gemini Embedding (`gemini-embedding-001`, 768), OpenAI `text-embedding-3-small` (1536) o `text-embedding-3-large` (3072). Al cambiarlo se recalculan los embeddings del proyecto en segundo plano con el texto guardado (sin OCR); mientras tanto la búsqueda por palabras sigue respondiendo. Conviene revisar `SEMANTIC_CACHE_MIN_SIMILARITY` con las pruebas de calidad: cada modelo reparte las similitudes de otra forma.
+- **Embeddings:** Multilingual E5 base (local, gratis, 768), Gemini Embedding (`gemini-embedding-001`, 768), OpenAI `text-embedding-3-small` (1536) o `text-embedding-3-large` (3072), o Mistral `mistral-embed` (1024). Al cambiarlo se recalculan los embeddings del proyecto en segundo plano con el texto guardado (sin OCR); mientras tanto la búsqueda por palabras sigue respondiendo. Conviene revisar `SEMANTIC_CACHE_MIN_SIMILARITY` con las pruebas de calidad: cada modelo reparte las similitudes de otra forma.
 - **Claves del asistente** para Gemini, OpenAI y Groq (ver «Claves de API por asistente»).
 
 Cada fragmento guarda con qué modelo se calculó (`document_chunks.embedding_model`), así que proyectos con dimensiones distintas conviven en la misma tabla. La búsqueda vectorial es exacta (sin índice ANN, que exige una dimensión fija); con el filtro por proyecto es rápida hasta decenas de miles de fragmentos por proyecto. La caché de respuestas se separa por modelo de lenguaje: cambiarlo hace que las preguntas se vuelvan a generar la primera vez.
 
-Variables: `EMBEDDING_MODEL` (por defecto de la plataforma, `Xenova/multilingual-e5-base`), `OPENAI_MODEL` (`gpt-5.4-mini`), `OPENAI_PRICE_INPUT_PER_M` / `OPENAI_PRICE_OUTPUT_PER_M` (0,75 / 4,50) para el panel de gastos.
+Variables: `EMBEDDING_MODEL` (por defecto de la plataforma, `Xenova/multilingual-e5-base`), `OPENAI_MODEL` (`gpt-5.4-mini`), `OPENAI_PRICE_INPUT_PER_M` / `OPENAI_PRICE_OUTPUT_PER_M` (0,75 / 4,50), `MISTRAL_MODEL` (`mistral-medium-latest`), `MISTRAL_PRICE_INPUT_PER_M` / `MISTRAL_PRICE_OUTPUT_PER_M` (1,50 / 7,50) para el panel de gastos.
