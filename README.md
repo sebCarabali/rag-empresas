@@ -204,6 +204,9 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 | PUT/DELETE | `/projects/:projectId/evals/cases/:caseId` | Editar / eliminar pregunta de prueba |
 | GET/POST | `/projects/:projectId/evals/runs` | Listar / ejecutar pruebas |
 | GET | `/projects/:projectId/evals/runs/:runId` | Resultado de una ejecución |
+| GET/PUT | `/projects/:projectId/models` | Modelos del proyecto (lenguaje, respaldo, embeddings) y claves disponibles |
+| POST | `/projects/:projectId/models/test` | Probar un modelo de lenguaje o de embeddings |
+| PUT/DELETE | `/companies/:companyId/provider-keys/:provider` | Clave de Gemini, OpenAI o Groq de la empresa (Vault) |
 | GET/POST | `/projects/:projectId/reindex` | Estado del índice de búsqueda / reindexar con el modelo actual (owner/admin) |
 | POST | `/widget/:key/messages/:id/feedback` | Valoración del visitante (público, requiere su `sessionId`) |
 
@@ -215,13 +218,15 @@ Gitflow: ver [CONTRIBUTING.md](./CONTRIBUTING.md).
 - Además, cada producto de un CSV se guarda en la tabla `catalog_items`. El chat le da a Gemini dos herramientas (`contar_productos` y `buscar_productos`) que ejecutan la función `search_catalog` con filtros exactos (menor, mayor, igual, contiene…), conteos agrupados y orden. Así responde bien preguntas como «telas de menos de 120 g/m²», «¿cuántas hay por submarca?» o «la más pesada». La función usa el JWT del usuario (RLS) y arma el SQL con `format(%L)`, sin riesgo de inyección.
 - El reordenador y los embeddings corren en la CPU de la función: la primera pregunta tras un despliegue descarga los modelos a `/tmp`.
 
-## Cambiar el modelo de embeddings
+## Modelos por proyecto
 
-El modelo por defecto es `Xenova/multilingual-e5-small` (384 dimensiones). Si se queda corto con preguntas difíciles, se puede pasar a `Xenova/multilingual-e5-base` (768, ~280 MB, unas 3 veces más lento al indexar) o `Xenova/multilingual-e5-large` (1024, ~560 MB). Debe ser un modelo E5 (usa los prefijos `query:`/`passage:`).
+En «Asistente y widget → Modelos» (owner/admin) cada proyecto elige:
 
-1. Si cambia la dimensión, en el SQL Editor de Supabase: `select public.set_embedding_dimensions(768);` Esto borra los embeddings (el texto se conserva) y marca todos los proyectos como pendientes.
-2. En el proyecto de la API en Vercel: `EMBEDDING_MODEL=Xenova/multilingual-e5-base` y `EMBEDDING_DIMENSIONS=768`; redesplegar.
-3. Cada proyecto se reindexa solo la primera vez que alguien lo abre o le pregunta (o con «Reindexar» en la lista de documentos). No se vuelven a leer los archivos ni se gasta OCR: se recalculan los embeddings del texto guardado. Mientras tanto la búsqueda por palabras sigue respondiendo.
-4. Revisar `SEMANTIC_CACHE_MIN_SIMILARITY` con las pruebas de calidad: cada modelo reparte las similitudes de otra forma.
+- **Modelo de lenguaje:** Gemini, Groq u OpenAI, con el modelo de una lista sugerida o escrito a mano, y un botón «Probar conexión».
+- **Respaldo:** otro proveedor (o ninguno) que responde solo si el principal falla o no empieza a tiempo; sus respuestas quedan provisionales en la caché.
+- **Embeddings:** Multilingual E5 base (local, gratis, 768), Gemini Embedding (`gemini-embedding-001`, 768), OpenAI `text-embedding-3-small` (1536) o `text-embedding-3-large` (3072). Al cambiarlo se recalculan los embeddings del proyecto en segundo plano con el texto guardado (sin OCR); mientras tanto la búsqueda por palabras sigue respondiendo. Conviene revisar `SEMANTIC_CACHE_MIN_SIMILARITY` con las pruebas de calidad: cada modelo reparte las similitudes de otra forma.
+- **Claves de la empresa** para Gemini, OpenAI y Groq, cifradas en Supabase Vault (solo se muestran los últimos 4 caracteres). Sin clave de la empresa se usa la de la plataforma (`GEMINI_API_KEY`, `GROQ_KEY`, `OPENAI_API_KEY` opcional).
 
-Entre los pasos 1 y 2 los documentos que se suban fallan por dimensión distinta; conviene hacerlos seguidos.
+Cada fragmento guarda con qué modelo se calculó (`document_chunks.embedding_model`), así que proyectos con dimensiones distintas conviven en la misma tabla. La búsqueda vectorial es exacta (sin índice ANN, que exige una dimensión fija); con el filtro por proyecto es rápida hasta decenas de miles de fragmentos por proyecto. La caché de respuestas se separa por modelo de lenguaje: cambiarlo hace que las preguntas se vuelvan a generar la primera vez.
+
+Variables: `EMBEDDING_MODEL` (por defecto de la plataforma, `Xenova/multilingual-e5-base`), `OPENAI_MODEL` (`gpt-5.4-mini`), `OPENAI_PRICE_INPUT_PER_M` / `OPENAI_PRICE_OUTPUT_PER_M` (0,75 / 4,50) para el panel de gastos.

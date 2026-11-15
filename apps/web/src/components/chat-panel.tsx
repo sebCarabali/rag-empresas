@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   api,
+  modelLabel,
   type CacheMatch,
   type Chatbot,
   type Conversation,
@@ -357,7 +358,7 @@ function MessageBubble({ message, color, botName }: { message: ChatMessage; colo
             {(info || message.cached) && (
               <span>
                 {info &&
-                  `${info.provider === 'groq' ? 'Groq' : 'Gemini'} · ${info.model}${info.keyOwner === 'company' ? ' · clave de la empresa' : ''}`}
+                  `${modelLabel(info)}${info.fallback ? ' (respaldo)' : ''}${info.keyOwner === 'company' ? ' · clave de la empresa' : ''}`}
                 {info && message.cached && ' · '}
                 {message.cached &&
                   (message.cacheMatch?.kind === 'semantic'

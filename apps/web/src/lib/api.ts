@@ -73,8 +73,64 @@ export interface ToolCall {
 }
 
 /** Modelo que generó la respuesta; fallback = se usó el respaldo (Groq). */
+export type LlmProvider = 'gemini' | 'groq' | 'openai';
+
+export const PROVIDER_LABEL: Record<LlmProvider, string> = { gemini: 'Gemini', groq: 'Groq', openai: 'OpenAI' };
+
+/** "Gemini · gemini-3.5-flash" */
+export function modelLabel(m: Pick<ModelInfo, 'provider' | 'model'>): string {
+  return `${PROVIDER_LABEL[m.provider] ?? m.provider} · ${m.model}`;
+}
+
+export interface ModelSettings {
+  llmProvider: LlmProvider;
+  llmModel: string | null;
+  llmFallback: LlmProvider | 'none';
+  llmFallbackModel: string | null;
+  embeddingModel: string | null;
+}
+
+export interface ProviderOption {
+  id: LlmProvider;
+  label: string;
+  suggestions: Array<{ id: string; note: string }>;
+  price: { input: number; output: number };
+  /** La empresa guardó su clave (se muestran los últimos 4 caracteres). */
+  company: boolean;
+  last4: string | null;
+  /** Hay clave de la plataforma. */
+  platform: boolean;
+}
+
+export interface EmbeddingOption {
+  id: string;
+  label: string;
+  provider: 'local' | 'gemini' | 'openai';
+  dimensions: number;
+  note: string;
+  pricePerM: number;
+}
+
+export interface ModelsConfig {
+  canEdit: boolean;
+  companyId: string;
+  settings: ModelSettings;
+  defaults: { llm: Record<LlmProvider, string>; embeddingModel: string; fallbackEnabled: boolean };
+  providers: ProviderOption[];
+  embeddings: EmbeddingOption[];
+  reindex: ReindexStatus;
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  ms: number;
+  detail: string;
+  model?: string;
+  keyOwner?: 'company' | 'platform';
+}
+
 export interface ModelInfo {
-  provider: 'gemini' | 'groq';
+  provider: LlmProvider;
   model: string;
   fallback: boolean;
   reason?: string;
@@ -129,7 +185,7 @@ export interface UsageReport {
   days: number;
   daily: UsageDay[];
   cachedAnswers: number;
-  prices: { gemini: { input: number; output: number }; groq: { input: number; output: number } };
+  prices: Record<'gemini' | 'groq', { input: number; output: number }> & { openai?: { input: number; output: number } };
   models: { gemini: string; groq: string };
   semanticThreshold: number;
   autoWarm: boolean;
@@ -367,6 +423,15 @@ export const api = {
   setGeminiKey: (companyId: string, apiKey: string) =>
     request<void>('PUT', `/companies/${companyId}/gemini-key`, { apiKey }),
   deleteGeminiKey: (companyId: string) => request<void>('DELETE', `/companies/${companyId}/gemini-key`),
+
+  models: (projectId: string) => request<ModelsConfig>('GET', `/projects/${projectId}/models`),
+  saveModels: (projectId: string, settings: ModelSettings) => request<ModelsConfig>('PUT', `/projects/${projectId}/models`, settings),
+  testModel: (projectId: string, body: { kind: 'llm' | 'embedding'; provider?: LlmProvider; model?: string | null }) =>
+    request<ModelTestResult>('POST', `/projects/${projectId}/models/test`, body),
+  setProviderKey: (companyId: string, provider: LlmProvider, apiKey: string) =>
+    request<void>('PUT', `/companies/${companyId}/provider-keys/${provider}`, { apiKey }),
+  deleteProviderKey: (companyId: string, provider: LlmProvider) =>
+    request<void>('DELETE', `/companies/${companyId}/provider-keys/${provider}`),
 
   conversations: (projectId: string) => request<Conversation[]>('GET', `/projects/${projectId}/conversations`),
   createConversation: (projectId: string) =>

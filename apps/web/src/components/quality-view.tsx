@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   api,
+  modelLabel,
   type EvalCase,
   type EvalResult,
   type EvalRun,
@@ -26,8 +27,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' });
 
-const modelLabel = (m: ModelInfo | null) =>
-  m ? `${m.provider === 'groq' ? 'Groq' : 'Gemini'} · ${m.model}` : null;
+const modelName = (m: ModelInfo | null) => (m ? modelLabel(m) : null);
 
 const splitList = (text: string) =>
   text
@@ -132,7 +132,7 @@ function FeedbackTab({ projectId }: { projectId: string }) {
               <p className="text-xs text-muted">
                 {f.rating === 1 ? '👍' : '👎'} · {fmtDate(f.updated_at)}
               </p>
-              <QA question={f.question} answer={f.answer} meta={modelLabel(f.model_info)} />
+              <QA question={f.question} answer={f.answer} meta={modelName(f.model_info)} />
               {f.comment && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">“{f.comment}”</p>}
             </Card>
           </li>
@@ -195,7 +195,7 @@ function WidgetTab({ projectId }: { projectId: string }) {
                 {m.rating === -1 && ' · 👎'}
                 {m.cached && ' · desde caché'}
               </p>
-              <QA question={m.question} answer={m.answer} meta={modelLabel(m.model_info)} />
+              <QA question={m.question} answer={m.answer} meta={modelName(m.model_info)} />
               {m.feedback_comment && (
                 <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">“{m.feedback_comment}”</p>
               )}
@@ -446,7 +446,7 @@ function RunDetail({ run }: { run: EvalRun & { results: EvalResult[] } }) {
             {r.error && <p className="text-xs text-red-700">Error: {r.error}</p>}
             <details>
               <summary className="cursor-pointer select-none text-xs text-muted">
-                Ver respuesta{modelLabel(r.model_info) ? ` · ${modelLabel(r.model_info)}` : ''}
+                Ver respuesta{modelName(r.model_info) ? ` · ${modelName(r.model_info)}` : ''}
               </summary>
               <p className="mt-1 whitespace-pre-wrap text-sm text-ink-2">{r.answer || '(sin respuesta)'}</p>
             </details>

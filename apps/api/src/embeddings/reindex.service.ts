@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
+import { ModelSettingsService } from '../models/model-settings.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { EmbeddingsService, toPgVector } from './embeddings.service';
 
@@ -33,7 +34,7 @@ const STALE_MS = 20 * 60_000;
 
 /**
  * Recalcula los embeddings de los fragmentos de un proyecto con el modelo
- * configurado (EMBEDDING_MODEL). No vuelve a leer los archivos: usa el texto
+ * elegido en la configuración del asistente (o EMBEDDING_MODEL por defecto). No vuelve a leer los archivos: usa el texto
  * ya guardado de cada fragmento, así que no gasta OCR ni tokens del modelo.
  *
  * Se lanza solo cuando un proyecto está indexado con otro modelo (al abrirlo
@@ -50,6 +51,7 @@ export class ReindexService {
     private readonly config: AppConfig,
     private readonly supabase: SupabaseService,
     private readonly embeddings: EmbeddingsService,
+    private readonly models: ModelSettingsService,
   ) {}
 
   async status(projectId: string): Promise<ReindexStatus> {
@@ -59,8 +61,9 @@ export class ReindexService {
       .eq('id', projectId)
       .single();
     if (error) throw new Error(error.message);
+    const target = await this.models.embeddingModel(projectId);
     return {
-      model: this.config.embeddingModel,
+      model: target,
       indexedWith: data.embedding_model,
       status: data.reindex_status,
       done: data.reindex_done,
@@ -68,7 +71,7 @@ export class ReindexService {
       startedAt: data.reindex_started_at,
       finishedAt: data.reindex_finished_at,
       error: data.reindex_error,
-      outdated: data.embedding_model !== this.config.embeddingModel,
+      outdated: data.embedding_model !== target,
     };
   }
 
@@ -116,20 +119,23 @@ export class ReindexService {
     if (error) throw new Error(error.message);
     if (!data?.length) return false;
 
+    const model = await this.models.embeddingModel(projectId);
     try {
-      await this.requester({ kind: 'reembed', projectId, model: this.config.embeddingModel });
+      await this.requester({ kind: 'reembed', projectId, model });
     } catch (err) {
       await this.markFailed(projectId, (err as Error).message);
       throw err;
     }
-    this.logger.log(`Reindexado de ${projectId} encolado (${count ?? 0} fragmentos, ${this.config.embeddingModel})`);
+    this.logger.log(`Reindexado de ${projectId} encolado (${count ?? 0} fragmentos, ${model})`);
     return true;
   }
 
   /** Procesa un lote; devuelve el siguiente trabajo si queda trabajo. */
   async run(job: ReembedJob): Promise<{ next?: ReembedJob }> {
-    if (job.model !== this.config.embeddingModel) {
-      this.logger.warn(`Reindexado de ${job.projectId} con ${job.model} abandonado: el modelo actual es ${this.config.embeddingModel}`);
+    this.models.invalidate(job.projectId);
+    const current = await this.models.embeddingModel(job.projectId);
+    if (job.model !== current) {
+      this.logger.warn(`Reindexado de ${job.projectId} con ${job.model} abandonado: el modelo actual es ${current}`);
       return {};
     }
     const db = this.supabase.admin;
@@ -141,8 +147,9 @@ export class ReindexService {
     }
 
     let cursor = job.cursor;
-    const { data: progress } = await db.from('projects').select('reindex_done').eq('id', job.projectId).single();
+    const { data: progress } = await db.from('projects').select('reindex_done, company_id').eq('id', job.projectId).single();
     let done = progress?.reindex_done ?? 0;
+    const embed = { model: job.model, companyId: progress?.company_id ?? null };
 
     for (;;) {
       let query = db
@@ -158,11 +165,11 @@ export class ReindexService {
 
       for (let i = 0; i < rows.length; i += EMBED_BATCH) {
         const batch = rows.slice(i, i + EMBED_BATCH);
-        const vectors = await this.embeddings.embedPassages(batch.map((r) => r.content));
+        const vectors = await this.embeddings.embedPassages(batch.map((r) => r.content), embed);
         const { error: upsertError } = await db
           .from('document_chunks')
           .upsert(
-            batch.map((r, j) => ({ ...r, embedding: toPgVector(vectors[j]) })),
+            batch.map((r, j) => ({ ...r, embedding: toPgVector(vectors[j]), embedding_model: job.model })),
             { onConflict: 'id' },
           );
         if (upsertError) throw new Error(upsertError.message);

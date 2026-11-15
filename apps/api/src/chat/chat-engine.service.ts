@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { CompanyKeysService } from '../companies/company-keys.service';
 import { EmbeddingsService, toPgVector } from '../embeddings/embeddings.service';
 import { ReindexService } from '../embeddings/reindex.service';
+import { cacheModelKey, ModelSettingsService } from '../models/model-settings.service';
 import { RerankerService } from '../rerank/reranker.service';
 import { UsageService, type TokenUsage, type UsageChannel } from '../usage/usage.service';
 import { AnswerCacheService, type CachedAnswer, type SemanticFields } from './answer-cache.service';
@@ -10,7 +10,7 @@ import { sameIntent } from './semantic-guard';
 import { createCatalogExecutor, loadCatalogContext, type CatalogToolCall } from './catalog-tools';
 import { loadEnrichments } from './enrichment-context';
 import type { ChatTurn } from './gemini.service';
-import { LlmService, type ModelInfo } from './llm.service';
+import { LlmService, type LlmRoute, type ModelInfo } from './llm.service';
 import {
   buildSystemInstruction,
   buildUserTurn,
@@ -65,6 +65,12 @@ export interface AskResult {
 
 type Generated = Omit<AskResult, 'cached' | 'cacheMatch'>;
 
+/** Modelos resueltos para una pregunta. */
+interface GenerateContext {
+  route: LlmRoute;
+  embed: { model: string; companyId: string };
+}
+
 /**
  * Responde una pregunta sobre un proyecto, emitiendo eventos NDJSON:
  * caché (exacta o por significado) → búsqueda híbrida → descripciones web →
@@ -80,10 +86,10 @@ export class ChatEngineService {
     private readonly embeddings: EmbeddingsService,
     private readonly llm: LlmService,
     private readonly cache: AnswerCacheService,
-    private readonly keys: CompanyKeysService,
     private readonly usage: UsageService,
     private readonly reranker: RerankerService,
     private readonly reindex: ReindexService,
+    private readonly models: ModelSettingsService,
   ) {}
 
   async ask(input: AskInput, onPartial?: (answer: string) => void): Promise<AskResult> {
@@ -97,7 +103,7 @@ export class ChatEngineService {
       provider: result.modelInfo?.provider ?? null,
       model: result.modelInfo?.model ?? null,
       fallback: result.modelInfo?.fallback ?? false,
-      keyOwner: result.modelInfo?.keyOwner ?? (result.modelInfo?.provider === 'groq' ? 'platform' : null),
+      keyOwner: result.modelInfo?.keyOwner ?? (result.modelInfo?.fallback ? 'platform' : null),
       usage: result.usage,
       durationMs: Date.now() - started,
     });
@@ -107,6 +113,12 @@ export class ChatEngineService {
   private async answer(input: AskInput, onPartial?: (answer: string) => void): Promise<AskResult> {
     const { db, projectId, question, history, bot, emit } = input;
 
+    // Modelos elegidos en la configuración del asistente (por defecto Gemini + Groq y E5 local).
+    const settings = await this.models.get(projectId);
+    const route = await this.models.route(input.companyId, settings);
+    const embed = { model: settings.embeddingModel || this.embeddings.modelId(), companyId: input.companyId };
+    const ctx: GenerateContext = { route, embed };
+
     // 1) Caché: cualquier pregunta que se entienda sola (no las de seguimiento).
     let cacheKey: string | null = null;
     let semantic: SemanticFields | null = null;
@@ -114,21 +126,22 @@ export class ChatEngineService {
     if (input.useCache !== false && this.cache.enabled && !AnswerCacheService.isFollowUp(question, history.length > 0)) {
       const version = await this.cache.contentVersion(db, projectId);
       const variant = botVariant(bot);
-      cacheKey = this.cache.key(projectId, version, question, variant);
-      semantic = { embedding: null, version, variant };
+      const model = cacheModelKey(route.primary);
+      cacheKey = this.cache.key(projectId, version, question, variant, model);
+      semantic = { embedding: null, version, variant, model, embeddingModel: embed.model };
 
       let found: { hit: CachedAnswer; match: CacheMatch } | null = null;
       const exact = await this.cache.get(cacheKey);
       if (exact) found = { hit: exact, match: { kind: 'exact' } };
       // 1b) Por significado: una pregunta guardada parecida, con las mismas cifras y términos del catálogo.
       if (!found && this.cache.semanticEnabled) {
-        semantic.embedding = await this.embeddings.embedQuery(question);
+        semantic.embedding = await this.embeddings.embedQuery(question, embed);
         found = await this.findSimilar(db, projectId, question, semantic);
       }
       // 1c) La misma pregunta ya respondida por Gemini en el otro canal (chat interno / widget)
       // con el mismo contenido: se reutiliza en vez de volver a generar o de usar Groq.
       if (!found || found.hit.modelInfo?.fallback) {
-        semantic.embedding ??= await this.embeddings.embedQuery(question);
+        semantic.embedding ??= await this.embeddings.embedQuery(question, embed);
         found = (await this.findGeminiSibling(projectId, question, semantic)) ?? found;
       }
       if (found && !found.hit.modelInfo?.fallback) return this.serveCached(found.hit, emit, found.match);
@@ -139,7 +152,7 @@ export class ChatEngineService {
 
     let result: Generated;
     try {
-      result = await this.generate(input, { allowFallback: !provisional }, onPartial, semantic?.embedding ?? undefined);
+      result = await this.generate(input, ctx, { allowFallback: !provisional }, onPartial, semantic?.embedding ?? undefined);
     } catch (err) {
       if (!provisional || input.signal.aborted) throw err;
       emit({ type: 'reset' });
@@ -154,7 +167,7 @@ export class ChatEngineService {
     }
     // Se cachean las respuestas de ambos modelos; una de Gemini reemplaza a la provisional de Groq.
     if (cacheKey && semantic && result.answer.trim()) {
-      semantic.embedding ??= await this.embeddings.embedQuery(question);
+      semantic.embedding ??= await this.embeddings.embedQuery(question, embed);
       await this.cache.put(cacheKey, projectId, question, result, semantic);
     }
     return { ...result, cached: false, cacheMatch: null };
@@ -166,7 +179,7 @@ export class ChatEngineService {
     question: string,
     semantic: SemanticFields,
   ): Promise<{ hit: CachedAnswer; match: CacheMatch } | null> {
-    const candidates = await this.cache.similar(projectId, semantic.version, semantic.variant, semantic.embedding!);
+    const candidates = await this.cache.similar(projectId, semantic, semantic.variant, semantic.embedding!);
     if (candidates.length === 0) return null;
     const vocabulary = await this.cache.vocabulary(db, projectId, semantic.version);
     for (const c of candidates) {
@@ -190,7 +203,7 @@ export class ChatEngineService {
     semantic: SemanticFields,
   ): Promise<{ hit: CachedAnswer; match: CacheMatch } | null> {
     const normalized = AnswerCacheService.normalizeQuestion(question);
-    const candidates = await this.cache.similar(projectId, semantic.version, null, semantic.embedding!, 0.97);
+    const candidates = await this.cache.similar(projectId, semantic, null, semantic.embedding!, 0.97);
     for (const c of candidates) {
       if (c.variant === semantic.variant || AnswerCacheService.normalizeQuestion(c.question) !== normalized) continue;
       const hit = await this.cache.get(c.cache_key);
@@ -221,6 +234,7 @@ export class ChatEngineService {
   /** Genera una respuesta nueva: búsqueda, contexto, herramientas y modelo. */
   private async generate(
     input: AskInput,
+    ctx: GenerateContext,
     options: { allowFallback: boolean },
     onPartial?: (answer: string) => void,
     precomputedEmbedding?: number[],
@@ -232,12 +246,13 @@ export class ChatEngineService {
     void this.reindex.ensureCurrent(projectId);
 
     // 2) Búsqueda híbrida, diversificada para que un producto no acapare el contexto.
-    const queryEmbedding = precomputedEmbedding ?? (await this.embeddings.embedQuery(question));
+    const queryEmbedding = precomputedEmbedding ?? (await this.embeddings.embedQuery(question, ctx.embed));
     const { data: matches, error } = await db.rpc('match_document_chunks', {
       p_project_id: projectId,
       query_embedding: toPgVector(queryEmbedding),
       query_text: question,
       match_count: MATCH_CANDIDATES,
+      p_embedding_model: ctx.embed.model,
     });
     if (error) throw new Error(`Búsqueda: ${error.message}`);
 
@@ -273,8 +288,7 @@ export class ChatEngineService {
     const execute = catalog ? createCatalogExecutor(db, projectId, sources, toolCalls) : undefined;
     const systemInstruction = buildSystemInstruction(bot, catalog?.instructions);
 
-    // 4) Modelo: clave de Gemini de la empresa si la configuró; respaldo en Groq si falla.
-    const geminiApiKey = await this.keys.getGeminiKey(input.companyId);
+    // 4) Modelo elegido (con la clave de la empresa si la configuró) y su respaldo si falla.
     const turns: ChatTurn[] = [...history, { role: 'user', content: buildUserTurn(question, chunks, extras) }];
     let answer = '';
     let modelInfo: ModelInfo | null = null;
@@ -283,7 +297,7 @@ export class ChatEngineService {
       tools: catalog?.declarations,
       execute,
       signal,
-      geminiApiKey,
+      route: ctx.route,
       allowFallback: options.allowFallback,
     })) {
       if (event.type === 'text') {

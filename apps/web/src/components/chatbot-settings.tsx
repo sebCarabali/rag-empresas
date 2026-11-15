@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type Chatbot } from '@/lib/api';
 import { ApiKeysPanel } from './api-keys-panel';
+import { ModelsPanel } from './models-panel';
 import { ProjectShell } from './project-shell';
 import { UsageTab } from './usage-tab';
 import { Button, Card, ErrorText, Input, Spinner } from './ui';
@@ -32,7 +33,7 @@ const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boo
 export function ChatbotSettings() {
   const { projectId } = useParams<{ projectId: string }>();
   const tabParam = useSearchParams().get('tab');
-  const tab = tabParam === 'uso' ? 'uso' : tabParam === 'claves' ? 'claves' : 'config';
+  const tab = tabParam === 'uso' || tabParam === 'claves' || tabParam === 'modelos' ? tabParam : 'config';
   const [bot, setBot] = useState<Chatbot | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [messagesToday, setMessagesToday] = useState(0);
@@ -111,9 +112,10 @@ export function ChatbotSettings() {
   return (
     <ProjectShell
       projectId={projectId}
-      title={tab === 'uso' ? 'Uso y gastos' : tab === 'claves' ? 'Claves de API' : 'Asistente y widget'}
+      title={tab === 'uso' ? 'Uso y gastos' : tab === 'claves' ? 'Claves de API' : tab === 'modelos' ? 'Modelos' : 'Asistente y widget'}
       tabs={[
         { id: 'config', label: 'Configuración', href: base },
+        { id: 'modelos', label: 'Modelos', href: `${base}?tab=modelos` },
         { id: 'claves', label: 'Claves de API', href: `${base}?tab=claves` },
         { id: 'uso', label: 'Uso y gastos', href: `${base}?tab=uso` },
       ]}
@@ -121,7 +123,8 @@ export function ChatbotSettings() {
     >
       <div className={`w-full space-y-6 ${tab === 'uso' ? 'max-w-6xl' : 'max-w-3xl'}`}>
         <ErrorText>{error}</ErrorText>
-        {!bot && !error && <Spinner />}
+        {!bot && !error && tab !== 'modelos' && <Spinner />}
+        {tab === 'modelos' && <ModelsPanel projectId={projectId} />}
         {bot && tab === 'claves' &&
           (canEdit ? (
             <ApiKeysPanel projectId={projectId} publicKey={bot.public_key} />

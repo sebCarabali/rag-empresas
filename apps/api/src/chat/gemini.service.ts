@@ -68,7 +68,7 @@ export class GeminiService {
   async *run(
     systemInstruction: string,
     turns: ChatTurn[],
-    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; apiKey?: string } = {},
+    options: { tools?: FunctionDeclaration[]; execute?: ToolExecutor; signal?: AbortSignal; apiKey?: string; model?: string } = {},
   ): AsyncGenerator<GeminiEvent> {
     // Clave de la empresa si la configuró; si no, la de la plataforma.
     const ai = options.apiKey ? geminiClient(options.apiKey) : this.ai;
@@ -85,7 +85,7 @@ export class GeminiService {
       // llamadas a funciones) pero se prohíbe usarlas, para obligar a responder.
       const finalRound = hasTools && round >= MAX_TOOL_ROUNDS;
       const stream = await ai.models.generateContentStream({
-        model: this.config.geminiModel,
+        model: options.model || this.config.geminiModel,
         contents,
         config: {
           systemInstruction,

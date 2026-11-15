@@ -13,6 +13,7 @@ import { EnrichmentService } from '../enrichment/enrichment.service';
 import { EvalRunnerService } from '../evals/eval-runner.service';
 import { IngestionQueueService } from '../queue/ingestion-queue.service';
 import { RerankerService } from '../rerank/reranker.service';
+import { ModelSettingsService } from '../models/model-settings.service';
 import { IngestionService } from './ingestion.service';
 import { OcrService } from './ocr.service';
 
@@ -23,6 +24,7 @@ import { OcrService } from './ocr.service';
 const SHARED = [
   EmbeddingsService,
   RerankerService,
+  ModelSettingsService,
   ReindexService,
   IngestionService,
   IngestionQueueService,
