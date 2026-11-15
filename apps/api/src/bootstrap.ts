@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { AppConfig } from './config/app-config';
+import { AppConfig } from './infrastructure/config/app-config';
 
 /** Crea y configura la app HTTP (compartido entre desarrollo local y Vercel). */
 export async function createApp(): Promise<INestApplication> {
