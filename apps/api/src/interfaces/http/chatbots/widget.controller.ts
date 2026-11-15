@@ -4,6 +4,7 @@ import {
   Get,
   HttpException,
   HttpStatus,
+  Inject,
   Logger,
   NotFoundException,
   Param,
@@ -19,9 +20,16 @@ import type { Request, Response } from 'express';
 import { Public } from '../auth/auth.guard';
 import { ChatEngineService } from '../../../application/chat/chat-engine.service';
 import type { ChatTurn } from '../../../domain/llm/llm';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ApiKeysService } from '../../../application/api-keys/api-keys.service';
-import { ChatbotsService, publicConfig, type ChatbotRow } from '../../../application/chatbots/chatbots.service';
+import { ChatbotsService } from '../../../application/chatbots/chatbots.service';
+import { publicConfig, type ChatbotRow } from '../../../domain/chatbots/chatbot';
+import {
+  CHATBOT_REPOSITORY,
+  SYSTEM_SCOPE,
+  WIDGET_MESSAGE_REPOSITORY,
+  type ChatbotRepository,
+  type WidgetMessageRepository,
+} from '../../../application/ports';
 
 class HistoryTurn {
   @IsIn(['user', 'assistant'])
@@ -94,7 +102,8 @@ export class WidgetController {
   private readonly logger = new Logger(WidgetController.name);
 
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(CHATBOT_REPOSITORY) private readonly bots: ChatbotRepository,
+    @Inject(WIDGET_MESSAGE_REPOSITORY) private readonly widgetMessages: WidgetMessageRepository,
     private readonly chatbots: ChatbotsService,
     private readonly engine: ChatEngineService,
     private readonly keys: ApiKeysService,
@@ -112,11 +121,15 @@ export class WidgetController {
     }
   }
 
+  private async enabledBot(publicKey: string): Promise<ChatbotRow> {
+    const bot = await this.chatbots.findByPublicKey(publicKey);
+    if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
+    return bot;
+  }
+
   @Get(':publicKey/config')
   async config(@Param('publicKey') publicKey: string) {
-    const bot = await this.chatbots.findByPublicKey(this.supabase.admin, publicKey);
-    if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
-    return publicConfig(bot);
+    return publicConfig(await this.enabledBot(publicKey));
   }
 
   @Post(':publicKey/messages')
@@ -126,18 +139,14 @@ export class WidgetController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const db = this.supabase.admin;
-    const bot = await this.chatbots.findByPublicKey(db, publicKey);
-    if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
+    const bot = await this.enabledBot(publicKey);
     this.requireToken(bot, req);
 
     const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
     if (!allowIp(`${bot.id}:${ip}`)) {
       throw new HttpException('Estás enviando mensajes muy rápido. Espera un momento.', HttpStatus.TOO_MANY_REQUESTS);
     }
-    const { data: used, error: usageError } = await db.rpc('widget_register_message', { p_chatbot_id: bot.id });
-    if (usageError) throw new Error(usageError.message);
-    if (Number(used) > bot.daily_message_limit) {
+    if ((await this.bots.registerWidgetMessage(bot.id)) > bot.daily_message_limit) {
       throw new HttpException(
         'El asistente alcanzó su límite de mensajes por hoy. Vuelve a intentarlo mañana.',
         HttpStatus.TOO_MANY_REQUESTS,
@@ -167,7 +176,7 @@ export class WidgetController {
     const question = dto.content.trim();
     try {
       const result = await this.engine.ask({
-        db,
+        scope: SYSTEM_SCOPE,
         projectId: bot.project_id,
         companyId: bot.company_id,
         question,
@@ -178,22 +187,22 @@ export class WidgetController {
         channel: 'widget',
       });
       // Registro para que la empresa vea lo que preguntan sus visitantes.
-      const { data: logged, error: logError } = await db
-        .from('widget_messages')
-        .insert({
-          chatbot_id: bot.id,
-          company_id: bot.company_id,
-          project_id: bot.project_id,
-          session_id: sessionId,
+      const messageId = await this.widgetMessages
+        .log({
+          chatbotId: bot.id,
+          companyId: bot.company_id,
+          projectId: bot.project_id,
+          sessionId,
           question,
           answer: result.answer,
-          model_info: result.modelInfo,
+          modelInfo: result.modelInfo,
           cached: result.cached,
         })
-        .select('id')
-        .single();
-      if (logError) this.logger.warn(`Widget ${bot.id}: no se registró el mensaje: ${logError.message}`);
-      emit({ type: 'done', cached: result.cached, messageId: logged?.id ?? null, sessionId });
+        .catch((err: Error) => {
+          this.logger.warn(`Widget ${bot.id}: no se registró el mensaje: ${err.message}`);
+          return null;
+        });
+      emit({ type: 'done', cached: result.cached, messageId, sessionId });
     } catch (err) {
       if (!abort.signal.aborted) {
         this.logger.error(`Widget ${bot.id}: ${(err as Error).message}`);
@@ -212,20 +221,16 @@ export class WidgetController {
     @Body() dto: WidgetFeedbackDto,
     @Req() req: Request,
   ) {
-    const db = this.supabase.admin;
-    const bot = await this.chatbots.findByPublicKey(db, publicKey);
-    if (!bot || !bot.widget_enabled) throw new NotFoundException('Chatbot no disponible');
+    const bot = await this.enabledBot(publicKey);
     this.requireToken(bot, req);
-    const { data, error } = await db
-      .from('widget_messages')
-      .update({ rating: dto.rating, feedback_comment: dto.comment?.trim() || null, feedback_at: new Date().toISOString() })
-      .eq('id', messageId)
-      .eq('chatbot_id', bot.id)
-      .eq('session_id', dto.sessionId)
-      .select('id, rating')
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data) throw new NotFoundException('Mensaje no encontrado');
-    return data;
+    const rated = await this.widgetMessages.rate({
+      chatbotId: bot.id,
+      sessionId: dto.sessionId,
+      messageId,
+      rating: dto.rating,
+      comment: dto.comment?.trim() || null,
+    });
+    if (!rated) throw new NotFoundException('Mensaje no encontrado');
+    return rated;
   }
 }

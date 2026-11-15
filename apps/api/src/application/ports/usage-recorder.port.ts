@@ -1,5 +1,6 @@
 import type { LlmProvider } from '../../domain/models/catalog';
 import type { TokenUsage } from '../../domain/llm/llm';
+import type { DataScope } from './data-scope';
 
 export type UsageChannel = 'app' | 'widget' | 'api' | 'eval' | 'warm' | 'ocr' | 'enrich';
 
@@ -22,3 +23,10 @@ export interface UsageRecorder {
 }
 
 export const USAGE_RECORDER = Symbol('USAGE_RECORDER');
+
+/** Puerto de salida: resumen diario del uso, para el panel (respeta los permisos del usuario). */
+export interface UsageStats {
+  daily(scope: DataScope, projectId: string, days: number, timeZone: string): Promise<unknown[]>;
+}
+
+export const USAGE_STATS = Symbol('USAGE_STATS');

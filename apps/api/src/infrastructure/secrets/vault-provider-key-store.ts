@@ -1,19 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { PROVIDER_LABEL, type LlmProvider } from '../../domain/models/catalog';
 import { MissingModelKeyError } from '../../domain/llm/llm';
-import type { ProviderKeyReader } from '../../application/ports';
+import type { DataScope, ProviderKeyReader, ProviderKeyWriter } from '../../application/ports';
+import { check } from '../persistence/supabase-result';
 import { SupabaseService } from '../supabase/supabase.service';
 
 /** Cuánto se recuerda en memoria la clave descifrada antes de volver a leer el Vault. */
 const CACHE_TTL_MS = 5 * 60_000;
 
 /**
- * Adaptador del puerto ProviderKeyReader sobre Supabase Vault: lee (con
- * service_role) las claves que la empresa guardó en cada asistente. Nunca las
- * devuelve al navegador.
+ * Adaptador de ProviderKeyReader y ProviderKeyWriter sobre Supabase Vault: lee
+ * (con service_role) las claves que la empresa guardó en cada asistente y las
+ * guarda con el cliente del usuario (las funciones exigen owner/admin). Nunca
+ * las devuelve al navegador.
  */
 @Injectable()
-export class VaultProviderKeyStore implements ProviderKeyReader {
+export class VaultProviderKeyStore implements ProviderKeyReader, ProviderKeyWriter {
   private readonly cache = new Map<string, { key: string | null; expires: number }>();
 
   constructor(private readonly supabase: SupabaseService) {}
@@ -42,5 +44,21 @@ export class VaultProviderKeyStore implements ProviderKeyReader {
 
   invalidate(projectId: string): void {
     for (const id of this.cache.keys()) if (id.startsWith(`${projectId}:`)) this.cache.delete(id);
+  }
+
+  async save(scope: DataScope, projectId: string, provider: LlmProvider, apiKey: string): Promise<void> {
+    const { error } = await this.supabase
+      .client(scope)
+      .rpc('set_project_provider_key', { p_project_id: projectId, p_provider: provider, p_key: apiKey });
+    check(error);
+    this.invalidate(projectId);
+  }
+
+  async remove(scope: DataScope, projectId: string, provider: LlmProvider): Promise<void> {
+    const { error } = await this.supabase
+      .client(scope)
+      .rpc('delete_project_provider_key', { p_project_id: projectId, p_provider: provider });
+    check(error);
+    this.invalidate(projectId);
   }
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import {
   ArrayMaxSize,
@@ -15,10 +15,16 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { CurrentUser, type AuthUser } from '../auth/auth-user';
-import { unwrap } from '../supabase-error';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
-import { CHATBOT_COLUMNS, ChatbotsService, DEFAULT_CHATBOT } from '../../../application/chatbots/chatbots.service';
+import { CurrentUser, scopeOf, type AuthUser } from '../auth/auth-user';
+import { DEFAULT_CHATBOT } from '../../../domain/chatbots/chatbot';
+import { ProjectAccessService } from '../../../application/access/project-access.service';
+import {
+  ADMIN_ROLES,
+  CHATBOT_REPOSITORY,
+  PROJECT_REPOSITORY,
+  type ChatbotRepository,
+  type ProjectRepository,
+} from '../../../application/ports';
 
 class ChatbotDto {
   @IsString()
@@ -91,39 +97,32 @@ export function normalizeOrigin(value: string): string {
 @Controller('projects/:projectId/chatbot')
 export class ChatbotsController {
   constructor(
-    private readonly supabase: SupabaseService,
-    private readonly chatbots: ChatbotsService,
+    @Inject(CHATBOT_REPOSITORY) private readonly bots: ChatbotRepository,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
+    private readonly access: ProjectAccessService,
   ) {}
 
   /** Configuración del asistente del proyecto (valores por defecto si aún no existe). */
   @Get()
   async get(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    const project = unwrap(await db.from('projects').select('id, company_id').eq('id', projectId).single(), 'Proyecto no encontrado');
-    const bot = await this.chatbots.findByProject(db, projectId);
-    const today = bot
-      ? (await db.from('widget_usage').select('messages').eq('chatbot_id', bot.id).eq('day', new Date().toISOString().slice(0, 10)).maybeSingle()).data
-      : null;
-    const canEdit = unwrap(
-      await db.rpc('has_company_role', { p_company_id: project.company_id, p_roles: ['owner', 'admin'] }),
-    );
+    const scope = scopeOf(user);
+    const { allowed: canEdit } = await this.access.check(scope, projectId, ADMIN_ROLES);
+    const bot = await this.bots.findByProject(scope, projectId);
     return {
       exists: Boolean(bot),
       canEdit,
-      messagesToday: today?.messages ?? 0,
+      messagesToday: bot ? await this.bots.messagesToday(scope, bot.id) : 0,
       chatbot: bot ?? { ...DEFAULT_CHATBOT, project_id: projectId, public_key: null },
     };
   }
 
-  /** Crea o actualiza la configuración (owner/admin; lo exige RLS). */
+  /** Crea o actualiza la configuración (owner/admin; lo exigen los permisos de la base). */
   @Put()
   async save(
     @CurrentUser() user: AuthUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() dto: ChatbotDto,
   ) {
-    const db = this.supabase.forUser(user.accessToken);
-    const project = unwrap(await db.from('projects').select('id, company_id').eq('id', projectId).single(), 'Proyecto no encontrado');
     const values = {
       ...dto,
       welcome_message: dto.welcome_message?.trim() || null,
@@ -135,27 +134,16 @@ export class ChatbotsController {
     if (values.widget_enabled && values.allowed_origins.length === 0) {
       throw new BadRequestException('Agrega al menos un dominio autorizado para activar el widget.');
     }
-    const existing = await this.chatbots.findByProject(db, projectId);
-    const result = existing
-      ? await db.from('chatbots').update(values).eq('id', existing.id).select(CHATBOT_COLUMNS).single()
-      : await db
-          .from('chatbots')
-          .insert({ ...values, project_id: projectId, company_id: project.company_id })
-          .select(CHATBOT_COLUMNS)
-          .single();
-    return unwrap(result, 'Solo owner o admin pueden configurar el asistente');
+    const scope = scopeOf(user);
+    return this.bots.save(scope, await this.projects.ref(scope, projectId), values);
   }
 
   /** Genera una clave pública nueva (la anterior deja de funcionar en los sitios). */
   @Post('rotate-key')
   async rotateKey(@CurrentUser() user: AuthUser, @Param('projectId', ParseUUIDPipe) projectId: string) {
-    const db = this.supabase.forUser(user.accessToken);
-    const bot = await this.chatbots.findByProject(db, projectId);
+    const scope = scopeOf(user);
+    const bot = await this.bots.findByProject(scope, projectId);
     if (!bot) throw new BadRequestException('Primero guarda la configuración del asistente');
-    const public_key = `bot_${randomBytes(16).toString('hex')}`;
-    return unwrap(
-      await db.from('chatbots').update({ public_key }).eq('id', bot.id).select(CHATBOT_COLUMNS).single(),
-      'Solo owner o admin pueden cambiar la clave',
-    );
+    return this.bots.setPublicKey(scope, bot.id, `bot_${randomBytes(16).toString('hex')}`);
   }
 }

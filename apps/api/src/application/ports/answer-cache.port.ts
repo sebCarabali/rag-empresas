@@ -41,6 +41,10 @@ export interface AnswerCache {
     minSimilarity?: number,
   ): Promise<SimilarQuestion[]>;
   put(key: string, projectId: string, question: string, value: CachedAnswer, semantic?: SemanticFields): Promise<void>;
+  /** Respuestas vigentes del proyecto. */
+  count(projectId: string): Promise<number>;
+  /** Quita los embeddings de las preguntas (tras cambiar de modelo); las respuestas exactas siguen sirviendo. */
+  forgetEmbeddings(projectId: string): Promise<void>;
 }
 
 export const ANSWER_CACHE = Symbol('ANSWER_CACHE');

@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ChatEngineService } from '../chat/chat-engine.service';
 import { ChatbotsService } from '../chatbots/chatbots.service';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { evaluateAnswer } from '../../domain/evals/evaluate';
+import type { ModelInfo } from '../../domain/llm/llm';
+import { EVAL_REPOSITORY, SYSTEM_SCOPE, type EvalRepository } from '../ports';
 
 export interface EvalJob {
   kind: 'eval';
@@ -24,46 +25,34 @@ export class EvalRunnerService {
   private readonly logger = new Logger(EvalRunnerService.name);
 
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(EVAL_REPOSITORY) private readonly evals: EvalRepository,
     private readonly engine: ChatEngineService,
     private readonly chatbots: ChatbotsService,
   ) {}
 
   async run(job: EvalJob): Promise<{ next?: EvalJob }> {
-    const db = this.supabase.admin;
     const started = Date.now();
 
-    const { data: run } = await db
-      .from('eval_runs')
-      .select('id, company_id, project_id, status')
-      .eq('id', job.runId)
-      .maybeSingle();
+    const run = await this.evals.findRun(job.runId);
     if (!run || run.status === 'done' || run.status === 'failed') return {};
-    if (run.status === 'queued') await db.from('eval_runs').update({ status: 'running' }).eq('id', run.id);
+    if (run.status === 'queued') await this.evals.markRunning(run.id);
 
-    const { data: cases, error } = await db
-      .from('eval_cases')
-      .select('id, question, must_include, must_not_include')
-      .eq('project_id', run.project_id)
-      .order('created_at', { ascending: true });
-    if (error) throw new Error(error.message);
+    const cases = await this.evals.casesForProject(run.project_id);
+    const done = await this.evals.completedCaseIds(run.id);
+    const bot = this.chatbots.profile(await this.chatbots.findByProject(SYSTEM_SCOPE, run.project_id), 'internal');
 
-    const { data: doneRows } = await db.from('eval_results').select('case_id').eq('run_id', run.id);
-    const done = new Set((doneRows ?? []).map((r) => r.case_id as string));
-    const bot = this.chatbots.profile(await this.chatbots.findByProject(db, run.project_id), 'internal');
-
-    for (const c of cases ?? []) {
+    for (const c of cases) {
       if (done.has(c.id)) continue;
       if (Date.now() - started > TIME_BUDGET_MS) {
         return { next: { kind: 'eval', runId: run.id, batch: (job.batch ?? 0) + 1 } };
       }
       const caseStarted = Date.now();
       let answer = '';
-      let modelInfo: unknown = null;
+      let modelInfo: ModelInfo | null = null;
       let caseError: string | null = null;
       try {
         const result = await this.engine.ask({
-          db,
+          scope: SYSTEM_SCOPE,
           projectId: run.project_id,
           companyId: run.company_id,
           question: c.question,
@@ -80,40 +69,27 @@ export class EvalRunnerService {
         caseError = (err as Error).message;
       }
       const outcome = evaluateAnswer(answer, c.must_include ?? [], c.must_not_include ?? []);
-      const { error: insertError } = await db.from('eval_results').upsert(
-        {
-          run_id: run.id,
-          company_id: run.company_id,
-          case_id: c.id,
-          question: c.question,
-          answer,
-          passed: !caseError && outcome.passed,
-          missing: outcome.missing,
-          forbidden: outcome.forbidden,
-          model_info: modelInfo,
-          duration_ms: Date.now() - caseStarted,
-          error: caseError,
-        },
-        { onConflict: 'run_id,case_id' },
-      );
-      if (insertError) throw new Error(insertError.message);
+      await this.evals.saveResult({
+        runId: run.id,
+        companyId: run.company_id,
+        caseId: c.id,
+        question: c.question,
+        answer,
+        passed: !caseError && outcome.passed,
+        missing: outcome.missing,
+        forbidden: outcome.forbidden,
+        modelInfo,
+        durationMs: Date.now() - caseStarted,
+        error: caseError,
+      });
     }
 
-    const { data: results } = await db.from('eval_results').select('passed').eq('run_id', run.id);
-    const passed = (results ?? []).filter((r) => r.passed).length;
-    const total = results?.length ?? 0;
-    await db
-      .from('eval_runs')
-      .update({ status: 'done', total, passed, failed: total - passed, finished_at: new Date().toISOString() })
-      .eq('id', run.id);
+    const { passed, total } = await this.evals.finishRun(run.id);
     this.logger.log(`Prueba ${run.id}: ${passed}/${total} correctas`);
     return {};
   }
 
   async markFailed(runId: string, message: string): Promise<void> {
-    await this.supabase.admin
-      .from('eval_runs')
-      .update({ status: 'failed', error: message.slice(0, 1000), finished_at: new Date().toISOString() })
-      .eq('id', runId);
+    await this.evals.failRun(runId, message);
   }
 }

@@ -135,4 +135,18 @@ export class SupabaseAnswerCache implements AnswerCache {
       if (cleanError) this.logger.warn(`No se limpió la caché: ${cleanError.message}`);
     }
   }
+
+  async count(projectId: string): Promise<number> {
+    const { count } = await this.supabase.admin
+      .from('answer_cache')
+      .select('cache_key', { count: 'exact', head: true })
+      .eq('project_id', projectId)
+      .gt('expires_at', new Date().toISOString());
+    return count ?? 0;
+  }
+
+  async forgetEmbeddings(projectId: string): Promise<void> {
+    const { error } = await this.supabase.admin.from('answer_cache').update({ question_embedding: null }).eq('project_id', projectId);
+    if (error) this.logger.warn(`No se quitaron los embeddings de la caché de ${projectId}: ${error.message}`);
+  }
 }

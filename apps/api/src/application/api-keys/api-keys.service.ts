@@ -1,8 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
-import { ChatbotsService, type ChatbotRow } from '../chatbots/chatbots.service';
+import { ChatbotsService } from '../chatbots/chatbots.service';
+import type { ChatbotRow } from '../../domain/chatbots/chatbot';
+import { DomainError, InvalidInputError } from '../../domain/errors';
 import { AppConfig } from '../../config/app-config';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { API_KEY_REPOSITORY, SYSTEM_SCOPE, type ApiKeyRepository, type ApiKeyRow, type ProjectRef } from '../ports';
 
 const KEY_PREFIX = 'sk_live_';
 const KEY_PATTERN = /^sk_live_[A-Za-z0-9_-]{43}$/;
@@ -18,6 +20,12 @@ export interface WidgetTokenClaims {
   /** Visitante según la empresa (opcional): agrupa sus preguntas. */
   sub?: string;
 }
+
+/** Falta la clave de API o no es válida (401). */
+export class InvalidApiKeyError extends DomainError {}
+
+/** Claves activas por proyecto. */
+export const MAX_ACTIVE_KEYS = 10;
 
 export interface ApiKeyContext {
   keyId: string;
@@ -70,7 +78,7 @@ export class ApiKeysService {
   private readonly secret: Buffer;
 
   constructor(
-    private readonly supabase: SupabaseService,
+    @Inject(API_KEY_REPOSITORY) private readonly repository: ApiKeyRepository,
     private readonly chatbots: ChatbotsService,
     config: AppConfig,
   ) {
@@ -83,22 +91,35 @@ export class ApiKeysService {
   async authenticate(header: string | undefined): Promise<ApiKeyContext> {
     const [scheme, key] = (header ?? '').split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !key || !KEY_PATTERN.test(key)) {
-      throw new UnauthorizedException('Falta la clave de API (Authorization: Bearer sk_live_…)');
+      throw new InvalidApiKeyError('Falta la clave de API (Authorization: Bearer sk_live_…)');
     }
-    const db = this.supabase.admin;
-    const { data: row } = await db
-      .from('api_keys')
-      .select('id, company_id, project_id, revoked_at')
-      .eq('key_hash', hashKey(key))
-      .maybeSingle();
-    if (!row || row.revoked_at) throw new UnauthorizedException('Clave de API no válida o revocada');
-    void db.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', row.id).then(() => undefined);
+    const row = await this.repository.findByHash(hashKey(key));
+    if (!row || row.revoked) throw new InvalidApiKeyError('Clave de API no válida o revocada');
+    this.repository.touch(row.id);
     return {
-      keyId: row.id as string,
-      companyId: row.company_id as string,
-      projectId: row.project_id as string,
-      chatbot: await this.chatbots.findByProject(db, row.project_id as string),
+      keyId: row.id,
+      companyId: row.companyId,
+      projectId: row.projectId,
+      chatbot: await this.chatbots.findByProject(SYSTEM_SCOPE, row.projectId),
     };
+  }
+
+  /** Genera una clave. Es la única vez que se devuelve completa: solo se guarda su hash. */
+  async create(project: ProjectRef, name: string, createdBy: string): Promise<ApiKeyRow & { key: string }> {
+    if ((await this.repository.countActive(project.id)) >= MAX_ACTIVE_KEYS) {
+      throw new InvalidInputError(`Máximo ${MAX_ACTIVE_KEYS} claves activas por proyecto`);
+    }
+    const { key, prefix, last4, hash } = generateKey();
+    const row = await this.repository.create({
+      companyId: project.companyId,
+      projectId: project.id,
+      name: name.trim(),
+      prefix,
+      last4,
+      hash,
+      createdBy,
+    });
+    return { ...row, key };
   }
 
   issueToken(chatbotId: string, ttlSeconds = TOKEN_DEFAULT_TTL, subject?: string) {

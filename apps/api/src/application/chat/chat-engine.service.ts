@@ -41,8 +41,8 @@ const MATCH_CANDIDATES = 30;
 export type Emit = (event: object) => void;
 
 export interface AskInput {
-  /** Ámbito de datos: el cliente del usuario (RLS) en la app; service_role en el widget y la API. */
-  db: DataScope;
+  /** Con los permisos del usuario en la app; del sistema en el widget, la API pública y el worker. */
+  scope: DataScope;
   projectId: string;
   companyId: string;
   question: string;
@@ -129,7 +129,7 @@ export class ChatEngineService {
       input,
       route: await this.models.route(projectId, settings),
       embed: { model: settings.embeddingModel || this.embeddings.modelId(), projectId },
-      knowledge: this.knowledge.forScope(input.db),
+      knowledge: this.knowledge.forScope(input.scope),
     };
 
     // 1) Caché: cualquier pregunta que se entienda sola (no las de seguimiento).
